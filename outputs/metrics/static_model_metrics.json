@@ -1,0 +1,62 @@
+{
+  "model": "RandomForestClassifier",
+  "train_rows": 30000,
+  "stream_rows": 20000,
+  "feature_count": 20,
+  "feature_names": [
+    "feature_0",
+    "feature_1",
+    "feature_2",
+    "feature_3",
+    "feature_4",
+    "feature_5",
+    "feature_6",
+    "feature_7",
+    "feature_8",
+    "feature_9",
+    "feature_10",
+    "feature_11",
+    "feature_12",
+    "feature_13",
+    "feature_14",
+    "feature_15",
+    "feature_16",
+    "feature_17",
+    "feature_18",
+    "feature_19"
+  ],
+  "train_metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "confusion_matrix": [
+      [
+        22745,
+        0
+      ],
+      [
+        0,
+        7255
+      ]
+    ]
+  },
+  "stream_metrics": {
+    "accuracy": 0.99605,
+    "precision": 0.9990920440358643,
+    "recall": 0.9919990984899707,
+    "f1_score": 0.9955329375176704,
+    "confusion_matrix": [
+      [
+        11118,
+        8
+      ],
+      [
+        71,
+        8803
+      ]
+    ]
+  },
+  "model_path": "cloud_model_storage\\static_random_forest.joblib",
+  "preprocessor_path": "cloud_model_storage\\preprocessor.joblib"
+}
