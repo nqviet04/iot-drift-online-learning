@@ -1,0 +1,10 @@
+{
+  "n_samples": 50000,
+  "n_features": 20,
+  "drift_points": [
+    12500,
+    25000,
+    37500
+  ],
+  "description": "True drift points are row indices where the stream enters a new stage."
+}
