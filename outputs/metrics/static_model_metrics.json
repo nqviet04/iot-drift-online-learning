@@ -25,11 +25,15 @@
     "feature_18",
     "feature_19"
   ],
+  "window_size": 1000,
+  "stream_relative_drift_points": [
+    7500
+  ],
   "train_metrics": {
     "accuracy": 1.0,
     "precision": 1.0,
     "recall": 1.0,
-    "f1_score": 1.0,
+    "f1": 1.0,
     "confusion_matrix": [
       [
         22745,
@@ -45,7 +49,7 @@
     "accuracy": 0.99605,
     "precision": 0.9990920440358643,
     "recall": 0.9919990984899707,
-    "f1_score": 0.9955329375176704,
+    "f1": 0.9955329375176704,
     "confusion_matrix": [
       [
         11118,
@@ -58,5 +62,7 @@
     ]
   },
   "model_path": "cloud_model_storage\\static_random_forest.joblib",
-  "preprocessor_path": "cloud_model_storage\\preprocessor.joblib"
+  "preprocessor_path": "cloud_model_storage\\preprocessor.joblib",
+  "window_metrics_path": "outputs\\metrics\\static_window_metrics.csv",
+  "f1_plot_path": "outputs\\figures\\static_f1_over_time.png"
 }
