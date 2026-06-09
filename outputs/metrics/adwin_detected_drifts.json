@@ -1,0 +1,14 @@
+{
+  "detector": "ADWIN",
+  "delta": 0.002,
+  "stream_start_index": 30000,
+  "stream_end_index": 49999,
+  "stream_samples": 20000,
+  "total_prediction_errors": 79,
+  "overall_error_rate": 0.00395,
+  "actual_drift_points": [
+    37500
+  ],
+  "detected_drifts": [],
+  "number_of_detected_drifts": 0
+}
