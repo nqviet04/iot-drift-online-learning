@@ -1,0 +1,55 @@
+{
+  "experiment": "adaptive_static_random_forest",
+  "train_rows": 30000,
+  "stream_rows": 20000,
+  "feature_count": 20,
+  "window_size": 1000,
+  "stream_batch_size": 256,
+  "recent_buffer_size": 5000,
+  "adwin_delta": 0.002,
+  "actual_drift_points": [
+    37500
+  ],
+  "detected_drift_points": [],
+  "number_of_retrains": 0,
+  "final_model_version": 0,
+  "total_retrain_time_seconds": 0,
+  "average_retrain_time_seconds": 0.0,
+  "static_metrics": {
+    "accuracy": 0.99605,
+    "precision": 0.9990920440358643,
+    "recall": 0.9919990984899707,
+    "f1": 0.9955329375176704,
+    "confusion_matrix": [
+      [
+        11118,
+        8
+      ],
+      [
+        71,
+        8803
+      ]
+    ]
+  },
+  "adaptive_metrics": {
+    "accuracy": 0.99605,
+    "precision": 0.9990920440358643,
+    "recall": 0.9919990984899707,
+    "f1": 0.9955329375176704,
+    "confusion_matrix": [
+      [
+        11118,
+        8
+      ],
+      [
+        71,
+        8803
+      ]
+    ]
+  },
+  "adaptive_minus_static_f1": 0.0,
+  "initial_model_path": "cloud_model_storage\\adaptive_rf_v0.joblib",
+  "window_metrics_path": "outputs\\metrics\\adaptive_static_window_metrics.csv",
+  "retrain_log_path": "outputs\\metrics\\adaptive_static_retrain_log.csv",
+  "comparison_plot_path": "outputs\\figures\\static_vs_adaptive_f1.png"
+}
