@@ -90,3 +90,54 @@ pip install -r requirements.txt
 ## Trạng Thái
 
 Skeleton project đã được tạo. Các module hiện là khung ban đầu để phát triển pipeline ở các bước tiếp theo.
+
+## FastAPI Model Endpoint
+
+API tự động load model mới nhất trong `cloud_model_storage/` theo thứ tự:
+
+1. Adaptive LSTM version mới nhất.
+2. Adaptive Random Forest version mới nhất.
+3. Static Random Forest.
+
+Khởi động API:
+
+```bash
+uvicorn api.main:app --reload
+```
+
+Mở Swagger UI tại `http://127.0.0.1:8000/docs`.
+
+Ví dụ request dự đoán một record:
+
+```json
+{
+  "feature_0": 0.1,
+  "feature_1": 0.2,
+  "feature_2": 0.3,
+  "feature_3": 0.4,
+  "feature_4": 0.5,
+  "feature_5": 0.6,
+  "feature_6": 0.7,
+  "feature_7": 0.8,
+  "feature_8": 0.9,
+  "feature_9": 1.0,
+  "feature_10": 0.1,
+  "feature_11": 0.2,
+  "feature_12": 0.3,
+  "feature_13": 0.4,
+  "feature_14": 0.5,
+  "feature_15": 0.6,
+  "feature_16": 0.7,
+  "feature_17": 0.8,
+  "feature_18": 0.9,
+  "feature_19": 1.0
+}
+```
+
+Endpoints:
+
+- `GET /`
+- `GET /health`
+- `GET /models`
+- `POST /predict`
+- `POST /predict_batch`
