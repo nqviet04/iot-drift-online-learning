@@ -1,0 +1,11 @@
+{
+  "detector": "ADWIN",
+  "delta": 0.002,
+  "actual_drift_points": [
+    37500
+  ],
+  "detected_drift_points": [
+    38016
+  ],
+  "detected_drift_count": 1
+}

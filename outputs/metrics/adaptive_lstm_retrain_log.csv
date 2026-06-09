@@ -1,0 +1,2 @@
+detected_drift_index,version,retrain_time_seconds,model_path,window_id,n_buffer_rows,n_sequences,epochs,batch_size
+38016,1,1.8336921001318842,cloud_model_storage\lstm_adaptive_v1.keras,8,5000,4991,3,64
