@@ -39,6 +39,7 @@ from src.static_model import save_model, train_random_forest
 
 
 INITIAL_MODEL_PATH = CLOUD_MODEL_DIR / "adaptive_rf_v0.joblib"
+PREPROCESSOR_PATH = CLOUD_MODEL_DIR / "adaptive_rf_preprocessor.joblib"
 WINDOW_METRICS_PATH = METRIC_DIR / "adaptive_static_window_metrics.csv"
 RETRAIN_LOG_PATH = METRIC_DIR / "adaptive_static_retrain_log.csv"
 RETRAIN_LOG_JSON_PATH = METRIC_DIR / "adaptive_static_retrain_log.json"
@@ -202,6 +203,7 @@ def main() -> None:
     preprocessor = Preprocessor()
     X_train_scaled = preprocessor.fit_transform(X_train).to_numpy()
     X_stream_scaled = preprocessor.transform(X_stream).to_numpy()
+    preprocessor.save(PREPROCESSOR_PATH)
     y_train_array = y_train.to_numpy()
     y_stream_array = y_stream.to_numpy()
 
@@ -330,6 +332,7 @@ def main() -> None:
         "adaptive_metrics": adaptive_metrics,
         "adaptive_minus_static_f1": adaptive_metrics["f1"] - static_metrics["f1"],
         "initial_model_path": str(_relative(INITIAL_MODEL_PATH)),
+        "preprocessor_path": str(_relative(PREPROCESSOR_PATH)),
         "window_metrics_path": str(_relative(WINDOW_METRICS_PATH)),
         "retrain_log_path": str(_relative(RETRAIN_LOG_PATH)),
         "comparison_plot_path": str(_relative(COMPARISON_PLOT_PATH)),
@@ -341,6 +344,7 @@ def main() -> None:
     print(f"Detected drift points: {detected_drifts}")
     print(f"Retrain count: {len(retrain_records)}")
     print(f"Final model version: {adaptive_trainer.model_version}")
+    print(f"Preprocessor: {_relative(PREPROCESSOR_PATH)}")
     print(f"Static F1: {static_metrics['f1']:.4f}")
     print(f"Adaptive F1: {adaptive_metrics['f1']:.4f}")
     print(f"Window metrics: {_relative(WINDOW_METRICS_PATH)}")

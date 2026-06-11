@@ -204,6 +204,11 @@ def main() -> None:
     all_adaptive_true: list[np.ndarray] = []
     all_adaptive_pred: list[np.ndarray] = []
     model_version = 0
+    sequence_context_X = np.empty(
+        (0, X_stream_scaled.shape[1]),
+        dtype=np.float32,
+    )
+    sequence_context_y = np.empty(0, dtype=np.int32)
 
     total_windows = (len(X_stream_scaled) + WINDOW_SIZE - 1) // WINDOW_SIZE
     print(
@@ -217,16 +222,28 @@ def main() -> None:
         window_end = min(window_start + WINDOW_SIZE, len(X_stream_scaled))
         X_window = X_stream_scaled[window_start:window_end]
         y_window = y_stream_array[window_start:window_end]
+        context_rows = len(sequence_context_X)
 
-        if len(X_window) < LSTM_TIMESTEPS:
+        if context_rows + len(X_window) < LSTM_TIMESTEPS:
             print(f"Skipping short window {window_id}: {len(X_window)} rows.")
             continue
 
+        X_sequence_input = np.concatenate(
+            [sequence_context_X, X_window],
+            axis=0,
+        )
+        y_sequence_input = np.concatenate(
+            [sequence_context_y, y_window],
+            axis=0,
+        )
         X_window_seq, y_window_seq = create_sequences(
-            X_window,
-            y_window,
+            X_sequence_input,
+            y_sequence_input,
             timesteps=LSTM_TIMESTEPS,
         )
+        context_size = LSTM_TIMESTEPS - 1
+        sequence_context_X = X_sequence_input[-context_size:].copy()
+        sequence_context_y = y_sequence_input[-context_size:].copy()
         static_predictions = predict_lstm_binary(static_model, X_window_seq)
         adaptive_predictions = predict_lstm_binary(adaptive_model, X_window_seq)
 
@@ -251,7 +268,9 @@ def main() -> None:
 
         window_detected_drifts: list[int] = []
         sequence_start_absolute = (
-            stream_start + window_start + LSTM_TIMESTEPS - 1
+            stream_start
+            + window_start
+            + max(LSTM_TIMESTEPS - 1 - context_rows, 0)
         )
         for sequence_offset, (y_true, y_pred) in enumerate(
             zip(y_window_seq, adaptive_predictions)
@@ -315,6 +334,7 @@ def main() -> None:
                 "end_index": stream_start + window_end - 1,
                 "n_rows": len(X_window),
                 "n_sequences": len(y_window_seq),
+                "context_rows": context_rows,
                 "model_version_used": version_used,
                 "drift_detected": bool(window_detected_drifts),
                 "static_accuracy": static_metrics["accuracy"],
@@ -396,6 +416,7 @@ def main() -> None:
         "window_size": WINDOW_SIZE,
         "recent_buffer_size": RECENT_BUFFER_SIZE,
         "timesteps": LSTM_TIMESTEPS,
+        "sequence_context_across_windows": True,
         "fine_tune_epochs": FINE_TUNE_EPOCHS,
         "fine_tune_batch_size": FINE_TUNE_BATCH_SIZE,
         "window_metrics_path": str(_relative(WINDOW_METRICS_PATH)),

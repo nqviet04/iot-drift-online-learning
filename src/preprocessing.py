@@ -73,7 +73,7 @@ def detect_label_column(df: pd.DataFrame) -> str:
 def _map_to_binary_label(value: object) -> int:
     """Map benign/normal/0 labels to 0 and every other value to 1."""
     if pd.isna(value):
-        return 1
+        raise ValueError("Label values cannot be missing.")
 
     if isinstance(value, (bool, np.bool_)):
         return int(value)
@@ -103,6 +103,12 @@ def create_binary_label(df: pd.DataFrame, label_col: str | None = None) -> pd.Da
         )
 
     output = df.copy()
+    missing_label_count = int(output[detected_label_col].isna().sum())
+    if missing_label_count:
+        raise ValueError(
+            f"Label column '{detected_label_col}' contains "
+            f"{missing_label_count} missing values."
+        )
     output[BINARY_LABEL_COLUMN] = output[detected_label_col].map(_map_to_binary_label).astype(int)
     return output
 
@@ -143,6 +149,12 @@ def clean_features(
             f"Label column '{label_col}' was not found. "
             "Call create_binary_label first or pass the correct label_col."
         )
+    missing_label_count = int(df[label_col].isna().sum())
+    if missing_label_count:
+        raise ValueError(
+            f"Label column '{label_col}' contains "
+            f"{missing_label_count} missing values."
+        )
 
     y = df[label_col].map(_map_to_binary_label).astype(int)
     candidate_columns = [
@@ -164,8 +176,6 @@ def clean_features(
 
     X = df[numeric_columns].copy()
     X = X.replace([np.inf, -np.inf], np.nan)
-    medians = X.median(numeric_only=True).fillna(0.0)
-    X = X.fillna(medians).fillna(0.0)
     X = X.astype(float)
 
     return X, y, numeric_columns
@@ -177,18 +187,22 @@ class Preprocessor:
     def __init__(self) -> None:
         self.scaler = StandardScaler()
         self.feature_names: list[str] | None = None
+        self.feature_medians: pd.Series | None = None
         self.is_fitted = False
 
     def fit_transform(self, X_train: pd.DataFrame) -> pd.DataFrame:
-        """Fit the scaler on train data only and return scaled train features."""
+        """Fit train-only imputation/scaling and return scaled train features."""
         self._validate_features(X_train)
         self.feature_names = list(X_train.columns)
-        transformed = self.scaler.fit_transform(X_train)
+        sanitized = X_train.replace([np.inf, -np.inf], np.nan)
+        self.feature_medians = sanitized.median(numeric_only=True).fillna(0.0)
+        imputed = sanitized.fillna(self.feature_medians).fillna(0.0)
+        transformed = self.scaler.fit_transform(imputed)
         self.is_fitted = True
         return pd.DataFrame(transformed, columns=self.feature_names, index=X_train.index)
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Scale features using the scaler fitted on the train split."""
+        """Impute and scale features using statistics fitted on the train split."""
         if not self.is_fitted or self.feature_names is None:
             raise ValueError("Preprocessor is not fitted. Call fit_transform on X_train first.")
 
@@ -196,8 +210,14 @@ class Preprocessor:
         if missing_columns:
             raise ValueError(f"Input data is missing required feature columns: {missing_columns}")
 
-        ordered_X = X[self.feature_names]
-        transformed = self.scaler.transform(ordered_X)
+        ordered_X = X[self.feature_names].replace([np.inf, -np.inf], np.nan)
+        feature_medians = getattr(self, "feature_medians", None)
+        if feature_medians is None:
+            # Backward compatibility for preprocessors saved before train-only
+            # imputation was introduced.
+            feature_medians = pd.Series(0.0, index=self.feature_names)
+        imputed = ordered_X.fillna(feature_medians).fillna(0.0)
+        transformed = self.scaler.transform(imputed)
         return pd.DataFrame(transformed, columns=self.feature_names, index=X.index)
 
     def save(self, path: str | Path) -> Path:

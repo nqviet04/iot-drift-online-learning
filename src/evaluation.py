@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precisio
 
 def compute_classification_metrics(y_true, y_pred) -> dict[str, Any]:
     """Compute binary classification metrics with safe zero-division behavior."""
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
     return {
         "accuracy": accuracy_score(y_true, y_pred),
         "precision": precision_score(y_true, y_pred, zero_division=0),

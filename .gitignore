@@ -31,29 +31,34 @@ Thumbs.db
 *.log
 
 # Data files
-data/raw/*
+data/raw/**
 !data/raw/.gitkeep
 !data/raw/TON_IoT/
+data/raw/TON_IoT/**
 !data/raw/TON_IoT/.gitkeep
 !data/raw/CICIoT/
+data/raw/CICIoT/**
 !data/raw/CICIoT/.gitkeep
-data/processed/*
+data/processed/**
 !data/processed/.gitkeep
 data/synthetic/*.csv
 !data/synthetic/.gitkeep
 
 # Experiment outputs
-outputs/*
+outputs/**
 !outputs/.gitkeep
 !outputs/figures/
+outputs/figures/**
 !outputs/figures/.gitkeep
 !outputs/metrics/
+outputs/metrics/**
 !outputs/metrics/.gitkeep
 !outputs/logs/
+outputs/logs/**
 !outputs/logs/.gitkeep
 
 # Local model storage
-cloud_model_storage/*
+cloud_model_storage/**
 !cloud_model_storage/.gitkeep
 
 # Model artifacts

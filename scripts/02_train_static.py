@@ -9,7 +9,14 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.config import CLOUD_MODEL_DIR, FIGURE_DIR, METRIC_DIR, RANDOM_STATE, WINDOW_SIZE
+from src.config import (
+    CLOUD_MODEL_DIR,
+    FIGURE_DIR,
+    METRIC_DIR,
+    RANDOM_STATE,
+    TRAIN_RATIO,
+    WINDOW_SIZE,
+)
 from src.data_loader import load_synthetic_dataset, time_based_split
 from src.evaluation import (
     compute_classification_metrics,
@@ -70,7 +77,11 @@ def main() -> None:
     df = load_synthetic_dataset()
     df = create_binary_label(df)
 
-    train_df, stream_df = time_based_split(df, train_ratio=0.6, timestamp_col="timestamp")
+    train_df, stream_df = time_based_split(
+        df,
+        train_ratio=TRAIN_RATIO,
+        timestamp_col="timestamp",
+    )
 
     X_train, y_train, feature_names = clean_features(train_df)
     X_stream, y_stream, _ = clean_features(stream_df)

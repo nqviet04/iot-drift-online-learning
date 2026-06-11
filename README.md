@@ -409,6 +409,7 @@ Output chính:
 ```text
 cloud_model_storage/adaptive_rf_v0.joblib
 cloud_model_storage/adaptive_rf_v{version}.joblib
+cloud_model_storage/adaptive_rf_preprocessor.joblib
 outputs/metrics/adaptive_static_window_metrics.csv
 outputs/metrics/adaptive_static_retrain_log.csv
 outputs/metrics/adaptive_static_summary.json
@@ -705,16 +706,16 @@ Kết quả phụ thuộc phiên bản thư viện, random seed và môi trườ
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Static Random Forest | 0.9961 | 0.9918 | 0.9954 | 0 | 0.000 s |
 | Adaptive Random Forest | 0.9961 | 0.9918 | 0.9954 | 0 | 0.000 s |
-| Adaptive LSTM | 0.9637 | 0.9241 | 0.9584 | 1 | 1.834 s |
+| Adaptive LSTM | 0.9627 | 0.9212 | 0.9572 | 1 | 2.890 s |
 
 Adaptive LSTM experiment:
 
 - Actual drift point: `37500`
-- Detected drift point: `38016`
-- Detection delay: `516` samples
-- Static LSTM overall F1: khoảng `0.9492`
-- Adaptive LSTM overall F1: khoảng `0.9573`
-- Final window F1: khoảng `0.9975`
+- Detected drift point: `38008`
+- Detection delay: `508` samples
+- Static LSTM overall F1: khoảng `0.9489`
+- Adaptive LSTM overall F1: khoảng `0.9561`
+- Final window F1: khoảng `0.9962`
 
 Random Forest đạt điểm rất cao trên synthetic data hiện tại, khiến error stream thay đổi chưa đủ mạnh để ADWIN kích hoạt adaptive retraining. Đây là hạn chế của kịch bản synthetic, không phải lỗi của detector.
 
@@ -918,17 +919,18 @@ Chỉ commit `.env.example` với giá trị rỗng hoặc placeholder.
 
 1. Synthetic drift chưa phản ánh đầy đủ độ phức tạp của traffic IoT thật.
 2. Random Forest hiện hoạt động quá tốt trên synthetic data nên ADWIN không trigger adaptive RF.
-3. LSTM online trong project thực chất là fine-tuning theo window, chưa phải online learning từng sample.
-4. Sequence context hiện được tạo riêng trong từng window, chưa giữ đầy đủ context xuyên biên window.
-5. Cloud model storage mới được mô phỏng bằng thư mục local.
-6. API LSTM phải pad dữ liệu khi request chưa đủ timestep.
-7. Hệ thống cần nhãn thật sau prediction để tạo error stream cho ADWIN.
-8. Trong hệ thống thực tế, nhãn có thể đến chậm hoặc không có sẵn.
-9. TON_IoT và CICIoT có nhiều phiên bản/schema khác nhau; cần mapping riêng.
-10. `scripts/01_prepare_data.py` chưa hoàn thiện cho dataset thật.
-11. Chưa có automated test suite đầy đủ.
-12. Dependencies hiện chưa pin version, nên kết quả có thể thay đổi nhẹ giữa môi trường.
-13. Chưa đánh giá resource usage chi tiết như RAM, CPU, GPU hoặc inference latency.
+3. Với split 60/40, stream hiện chỉ chứa drift point `37500`; hai drift trước nằm trong train.
+4. LSTM online trong project thực chất là fine-tuning theo window, chưa phải online learning từng sample.
+5. Adaptive LSTM đã giữ context xuyên biên window, nhưng effective update latency sau khi kết thúc window chưa được đo riêng.
+6. Cloud model storage mới được mô phỏng bằng thư mục local.
+7. API LSTM phải pad dữ liệu khi request chưa đủ timestep.
+8. Hệ thống cần nhãn thật sau prediction để tạo error stream cho ADWIN.
+9. Trong hệ thống thực tế, nhãn có thể đến chậm hoặc không có sẵn.
+10. TON_IoT và CICIoT có nhiều phiên bản/schema khác nhau; cần mapping riêng.
+11. `scripts/01_prepare_data.py` chưa hoàn thiện cho dataset thật.
+12. Chưa có automated test suite đầy đủ.
+13. Dependencies hiện chưa pin version, nên kết quả có thể thay đổi nhẹ giữa môi trường.
+14. Chưa đánh giá resource usage chi tiết như RAM, CPU, GPU hoặc inference latency.
 
 ## 20. Hướng Phát Triển
 

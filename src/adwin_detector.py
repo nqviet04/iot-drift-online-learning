@@ -48,13 +48,31 @@ def calculate_detection_delay(
     actual_drift_points: list[int],
     detected_drift_points: list[int],
 ) -> pd.DataFrame:
-    """Match each actual drift with the first detection at or after it."""
+    """Match each actual drift with one detection before the next actual drift."""
+    sorted_actual = sorted(int(point) for point in actual_drift_points)
     sorted_detected = sorted(int(point) for point in detected_drift_points)
     rows: list[dict[str, int | None]] = []
+    detection_cursor = 0
 
-    for actual_point in actual_drift_points:
-        actual = int(actual_point)
-        detected = next((point for point in sorted_detected if point >= actual), None)
+    for actual_index, actual in enumerate(sorted_actual):
+        while (
+            detection_cursor < len(sorted_detected)
+            and sorted_detected[detection_cursor] < actual
+        ):
+            detection_cursor += 1
+
+        next_actual = (
+            sorted_actual[actual_index + 1]
+            if actual_index + 1 < len(sorted_actual)
+            else None
+        )
+        detected = None
+        if detection_cursor < len(sorted_detected):
+            candidate = sorted_detected[detection_cursor]
+            if next_actual is None or candidate < next_actual:
+                detected = candidate
+                detection_cursor += 1
+
         rows.append(
             {
                 "actual_drift_point": actual,

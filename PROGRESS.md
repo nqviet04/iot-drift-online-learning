@@ -1,6 +1,6 @@
 # Project Progress
 
-## 2026-06-10
+## 2026-06-12
 
 ## Done
 
@@ -81,19 +81,20 @@
 ### Adaptive LSTM
 
 - Hoàn thành `scripts/06_run_adaptive_lstm.py`.
-- ADWIN phát hiện drift tại index `38016`, sau actual drift `37500`.
-- Detection delay: `516` mẫu.
+- Adaptive LSTM giữ liên tục 9 dòng context giữa các stream window.
+- ADWIN phát hiện drift tại index `38008`, sau actual drift `37500`.
+- Detection delay: `508` mẫu.
 - Fine-tune một lần trên recent buffer 5.000 dòng:
   - Epochs: `3`
   - Batch size: `64`
-  - Fine-tune time gần nhất: khoảng `1.83` giây
+  - Fine-tune time gần nhất: khoảng `2.89` giây
   - Final model version: `1`
 - Kết quả:
-  - Static LSTM overall F1: khoảng `0.9492`
-  - Adaptive LSTM overall F1: khoảng `0.9573`
-  - Final window F1: khoảng `0.9987`
-  - Best window F1: khoảng `0.9987`
-  - Worst window F1: khoảng `0.8899`
+  - Static LSTM overall F1: khoảng `0.9489`
+  - Adaptive LSTM overall F1: khoảng `0.9561`
+  - Final window F1: khoảng `0.9962`
+  - Best window F1: khoảng `0.9962`
+  - Worst window F1: khoảng `0.8886`
 
 ### Model comparison
 
@@ -103,7 +104,7 @@
 - Average F1 gần nhất:
   - Static Random Forest: `0.9954`
   - Adaptive Random Forest: `0.9954`
-  - Adaptive LSTM: `0.9584`
+  - Adaptive LSTM: `0.9572`
 - Đã tạo biểu đồ accuracy/F1 theo thời gian và trade-off F1 vs update cost.
 
 ### FastAPI model endpoint
@@ -121,7 +122,51 @@
   - `POST /predict`
   - `POST /predict_batch`
 - Có Pydantic schema, feature validation, confidence và lỗi 503 nếu không có model.
-- README đã có hướng dẫn chạy API và JSON request mẫu.
+- Đã kiểm thử HTTP thực tế với `/health`, `/models`, `/predict` và `/predict_batch`.
+
+### Streamlit dashboard
+
+- Hoàn thành `dashboard/app.py`.
+- Dashboard có 5 tab:
+  - Dataset Overview.
+  - Static Model Performance.
+  - ADWIN Drift Detection.
+  - Adaptive Model.
+  - Model Comparison.
+- Sidebar hỗ trợ chọn metrics file, metric F1/accuracy/recall và xem model inventory.
+- Dashboard đọc trực tiếp synthetic dataset, metrics, retrain log và model artifacts.
+- Dùng Plotly để vẽ biểu đồ tương tác.
+- Nếu thiếu output, dashboard hiển thị warning và không crash.
+- Đã kiểm thử bằng `streamlit.testing.v1.AppTest`:
+  - Runtime exceptions: `0`.
+  - Số tab: `5`.
+  - Sidebar selectors: `2`.
+  - Rerun khi đổi metric sang Recall: thành công.
+
+### Experiment report
+
+- Hoàn thành `scripts/08_generate_experiment_report.py`.
+- Tự động đọc static metrics, ADWIN delay, adaptive summaries và model comparison.
+- Tạo báo cáo tiếng Việt tại `outputs/experiment_report.md`.
+- Report gồm bảng Markdown, detection delay, trade-off, kết luận tự động và link biểu đồ.
+- Nếu thiếu metrics file, script ghi chú “Chưa có dữ liệu” và không crash.
+- Report hiện có 132 dòng và 11 image links hợp lệ.
+
+### Project documentation
+
+- Viết lại `README.md` chi tiết bằng tiếng Việt.
+- README hiện có:
+  - Mục tiêu và bài toán concept drift.
+  - Kiến trúc hệ thống bằng Mermaid.
+  - Cấu trúc thư mục.
+  - Hướng dẫn cài đặt Windows/macOS/Linux.
+  - Thứ tự chạy toàn bộ demo.
+  - Cách dùng TON_IoT/CICIoT.
+  - Giải thích metrics.
+  - Kết quả demo.
+  - API, dashboard, report generator.
+  - Hạn chế, hướng phát triển và troubleshooting.
+- Đã rà UTF-8, command demo và credential pattern.
 
 ## Verified Commands
 
@@ -135,6 +180,8 @@ python scripts/04_run_adaptive_static.py
 python scripts/05_train_lstm.py
 python scripts/06_run_adaptive_lstm.py
 python scripts/07_compare_models.py
+python scripts/08_generate_experiment_report.py
+streamlit run dashboard/app.py
 uvicorn api.main:app --reload
 ```
 
@@ -147,6 +194,11 @@ Các kiểm tra bổ sung đã pass:
 - Smoke test ADWIN trên abrupt error stream.
 - FastAPI startup load đúng `lstm_adaptive_v1.keras`.
 - HTTP `/health`, `/models` và `/predict` trả response hợp lệ.
+- Streamlit health endpoint trả HTTP 200.
+- Streamlit AppTest render 5 tab không có exception.
+- Report generator xử lý file thiếu mà không crash.
+- `outputs/experiment_report.md` đọc UTF-8 thành công và tất cả image links đều tồn tại.
+- README có đủ các section và command demo yêu cầu.
 
 ## Generated Outputs
 
@@ -159,6 +211,7 @@ Các kiểm tra bổ sung đã pass:
 - `cloud_model_storage/static_random_forest.joblib`
 - `cloud_model_storage/preprocessor.joblib`
 - `cloud_model_storage/adaptive_rf_v0.joblib`
+- `cloud_model_storage/adaptive_rf_preprocessor.joblib`
 - `cloud_model_storage/lstm_initial.keras`
 - `cloud_model_storage/lstm_preprocessor.joblib`
 - `cloud_model_storage/lstm_adaptive_v1.keras`
@@ -196,33 +249,41 @@ Các kiểm tra bổ sung đã pass:
 - `outputs/figures/compare_average_f1.png`
 - `outputs/figures/accuracy_vs_update_cost.png`
 
-Các generated artifacts trên nằm trong đường dẫn đã được `.gitignore`.
+### Report and documentation
+
+- `outputs/experiment_report.md`
+- `README.md`
+- `PROGRESS.md`
+
+Dataset synthetic CSV, model artifacts và nội dung trong `outputs/` nằm trong đường dẫn đã được `.gitignore`. `README.md` và `PROGRESS.md` là tài liệu project và có thể commit lên Git.
 
 ## Known Issues
 
 - `scripts/01_prepare_data.py` vẫn là placeholder.
-- `scripts/08_generate_experiment_report.py` vẫn là placeholder.
 - Chưa chạy pipeline với dataset TON_IoT và CICIoT thật.
 - Mapping schema/label cụ thể cho từng phiên bản TON_IoT và CICIoT chưa được xác nhận.
+- Với split 60/40 hiện tại, hai drift point `12500` và `25000` nằm trong train; stream chỉ còn drift point `37500` để đánh giá detection delay.
 - Synthetic data hiện khá dễ đối với Random Forest, làm prediction error quá thấp để ADWIN trigger adaptive static retraining.
-- Adaptive LSTM tạo sequence riêng theo từng window, nên context giữa hai window chưa được giữ liên tục.
+- Adaptive LSTM ghi detection index theo error stream nhưng chỉ fine-tune sau khi xử lý xong window; effective update latency chưa được báo cáo riêng.
 - API với LSTM phải pad/lặp dữ liệu khi request không có đủ 10 timesteps; đây là mô phỏng, chưa phải stateful production inference.
-- Dashboard Streamlit vẫn là giao diện placeholder.
 - AWS S3 upload/download chưa được triển khai; project hiện chỉ dùng local cloud model storage.
 - Chưa có automated unit/integration test suite.
 - Dependencies chưa pin version, nên khả năng tái lập môi trường giữa các máy chưa được đảm bảo hoàn toàn.
 - TensorFlow trên native Windows hiện chạy CPU; không sử dụng GPU với TensorFlow phiên bản mới.
+- ADWIN cần nhãn thật sau prediction để tạo error stream; trong hệ thống thực tế nhãn có thể đến chậm hoặc không có sẵn.
+- Chưa đo chi tiết inference latency, RAM, CPU/GPU usage và model-switch downtime.
 
 ## Next Steps
 
 1. Implement `scripts/01_prepare_data.py` cho synthetic, TON_IoT và CICIoT.
 2. Tải và kiểm thử pipeline với dataset TON_IoT/CICIoT thật.
 3. Chuẩn hóa schema mapping, timestamp và binary label cho từng dataset.
-4. Implement `scripts/08_generate_experiment_report.py`.
-5. Tạo báo cáo tự động gồm metrics, detection delay, retrain cost và các figure.
-6. Cải thiện synthetic drift để static model suy giảm rõ hơn và ADWIN có thể trigger.
-7. Giữ sequence context xuyên qua các stream window cho adaptive LSTM.
-8. Thêm test suite cho data loader, preprocessing, ADWIN, model registry và API.
-9. Hoàn thiện Streamlit dashboard.
-10. Pin dependency versions và thêm hướng dẫn tái lập môi trường.
-11. Mở rộng `aws_storage.py` để upload/download model qua S3 bằng environment variables hoặc IAM role.
+4. Cải thiện synthetic drift để static model suy giảm rõ hơn và ADWIN có thể trigger.
+5. Đánh giá thêm ảnh hưởng của window size và số timestep lên detection delay/F1 của LSTM.
+6. Thêm automated test suite cho data loader, preprocessing, ADWIN, model registry, API và dashboard.
+7. Pin dependency versions và thêm lock file để tăng khả năng tái lập.
+8. Đo inference latency, RAM, CPU/GPU usage và model update downtime.
+9. Mở rộng `aws_storage.py` để upload/download model qua S3 bằng environment variables hoặc IAM role.
+10. Tích hợp MQTT/Kafka để nhận IoT stream thời gian thực.
+11. Thử thêm DDM, EDDM, Page-Hinkley, KSWIN và Hoeffding Tree.
+12. Mở rộng sang multi-class attack classification.

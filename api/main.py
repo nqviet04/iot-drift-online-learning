@@ -26,6 +26,9 @@ ADAPTIVE_RF_PATTERN = re.compile(r"^adaptive_rf_v(\d+)\.joblib$")
 STATIC_RF_FILENAME = "static_random_forest.joblib"
 LSTM_PREPROCESSOR_PATH = CLOUD_MODEL_DIR / "lstm_preprocessor.joblib"
 RF_PREPROCESSOR_PATH = CLOUD_MODEL_DIR / "preprocessor.joblib"
+ADAPTIVE_RF_PREPROCESSOR_PATH = (
+    CLOUD_MODEL_DIR / "adaptive_rf_preprocessor.joblib"
+)
 
 
 class FeatureRecord(RootModel[dict[str, float]]):
@@ -109,7 +112,12 @@ def _select_model_artifact() -> tuple[str, int | None, Path, Path]:
     adaptive_rf = _versioned_models(ADAPTIVE_RF_PATTERN)
     if adaptive_rf:
         version, path = adaptive_rf[0]
-        return "adaptive_random_forest", version, path, RF_PREPROCESSOR_PATH
+        preprocessor_path = (
+            ADAPTIVE_RF_PREPROCESSOR_PATH
+            if ADAPTIVE_RF_PREPROCESSOR_PATH.exists()
+            else RF_PREPROCESSOR_PATH
+        )
+        return "adaptive_random_forest", version, path, preprocessor_path
 
     static_path = CLOUD_MODEL_DIR / STATIC_RF_FILENAME
     if static_path.exists():
