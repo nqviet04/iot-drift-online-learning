@@ -1,113 +1,774 @@
-# IoT Drift Online Learning
+# Phát Hiện Drift Trong Hệ Thống IoT Bằng Online Learning
 
-Đồ án môn học: **Phát hiện drift trong hệ thống IoT bằng Online Learning**.
+Đồ án môn học xây dựng một pipeline Machine Learning mô phỏng hệ thống giám sát an ninh IoT theo thời gian thực. Hệ thống phân loại traffic thành:
 
-Project mô phỏng luồng dữ liệu IoT, huấn luyện mô hình binary classification (`0 = benign/normal`, `1 = attack`), phát hiện concept drift bằng ADWIN và so sánh static model với adaptive model. Khi chưa có TON_IoT hoặc CICIoT thật, pipeline sẽ dùng synthetic dataset để kiểm thử end-to-end.
+- `0`: benign/normal
+- `1`: attack
 
-## Mục Tiêu
+Project tập trung vào bài toán **concept drift**: phân phối dữ liệu hoặc pattern tấn công thay đổi theo thời gian khiến mô hình đã huấn luyện bị suy giảm hiệu quả. ADWIN được dùng để theo dõi prediction error và kích hoạt retraining hoặc fine-tuning khi phát hiện drift.
 
-- Dùng TON_IoT chia theo thời gian để mô phỏng IoT stream.
-- Dùng CICIoT để mô phỏng concept drift, ví dụ thay đổi pattern tấn công hoặc tỷ lệ attack/benign.
-- So sánh static model và adaptive model.
-- Dùng ADWIN để phát hiện suy giảm hiệu năng.
-- Xây dựng LSTM online/fine-tuning theo window.
-- Khi phát hiện drift, adaptive model retrain hoặc fine-tune.
-- Mô phỏng cloud model storage bằng `cloud_model_storage/`.
-- Lưu kết quả experiment vào `outputs/`.
+Project hiện hỗ trợ:
 
-## Cấu Trúc Project
+- Synthetic IoT stream có nhiều giai đoạn drift.
+- Static Random Forest baseline.
+- ADWIN drift detection.
+- Adaptive Random Forest với recent buffer.
+- LSTM cho dữ liệu chuỗi thời gian.
+- Adaptive LSTM fine-tuning theo window.
+- Đánh giá theo từng stream window.
+- So sánh hiệu năng và update cost.
+- FastAPI model endpoint.
+- Streamlit dashboard.
+- Báo cáo Markdown tự động.
+
+## 1. Mục Tiêu
+
+Các mục tiêu chính của đồ án:
+
+1. Phát hiện thời điểm model bắt đầu suy giảm trên IoT data stream.
+2. Phát hiện sự thay đổi pattern tấn công, chẳng hạn từ DoS sang DDoS, Recon hoặc Mirai.
+3. Dùng ADWIN để phát hiện drift dựa trên prediction error:
+   - `0`: model dự đoán đúng.
+   - `1`: model dự đoán sai.
+4. Khi ADWIN phát hiện drift:
+   - Retrain Random Forest bằng recent buffer.
+   - Fine-tune LSTM bằng dữ liệu gần nhất.
+5. So sánh static model và adaptive model.
+6. Đo detection delay giữa actual drift point và detected drift point.
+7. Đo số lần retrain, thời gian retrain và model version.
+8. Phân tích trade-off giữa accuracy/F1 và update cost.
+9. Mô phỏng cloud model storage bằng thư mục local.
+10. Chuẩn bị kiến trúc để có thể mở rộng lên AWS S3 hoặc nền tảng cloud khác.
+
+## 2. Bài Toán Concept Drift Trong IoT
+
+Trong hệ thống IoT, dữ liệu không cố định theo thời gian. Một mô hình được huấn luyện tốt tại thời điểm ban đầu có thể giảm chất lượng khi:
+
+- Thiết bị mới xuất hiện.
+- Hành vi người dùng thay đổi.
+- Tỷ lệ normal/attack thay đổi.
+- Pattern tấn công mới xuất hiện.
+- Attacker thay đổi kỹ thuật để tránh model.
+- Cấu hình mạng, protocol hoặc topology thay đổi.
+
+Ví dụ:
+
+- Giai đoạn đầu chủ yếu là benign traffic và một lượng nhỏ DoS.
+- Sau đó tỷ lệ attack tăng và chuyển sang DDoS.
+- Tiếp theo xuất hiện Recon hoặc Mirai với phân phối feature mới.
+- Cuối cùng benign và attack trộn lẫn phức tạp hơn.
+
+Nếu chỉ dùng static model, model không được cập nhật sau khi deploy. Adaptive model có thể dùng dữ liệu gần nhất để học lại khi drift được phát hiện.
+
+## 3. Kiến Trúc Hệ Thống
+
+```mermaid
+flowchart LR
+    A[Dataset] --> B[Stream Simulator]
+    B --> C[Preprocessing]
+    C --> D[Cloud Model]
+    D --> E[Prediction]
+    E --> F[Prediction Error Stream]
+    F --> G[ADWIN]
+    G -->|No drift| B
+    G -->|Drift detected| H[Recent Buffer]
+    H --> I[Adaptive Retraining / LSTM Fine-tuning]
+    I --> J[Model Registry]
+    J --> D
+```
+
+Luồng xử lý:
+
+1. Dataset được sắp xếp hoặc chia theo thời gian để mô phỏng stream.
+2. Preprocessor chọn numeric features, xử lý missing values và scale dữ liệu.
+3. Model hiện tại dự đoán normal hoặc attack.
+4. Sau khi nhãn thật xuất hiện, hệ thống tạo prediction error.
+5. ADWIN nhận lần lượt các error value.
+6. Nếu ADWIN phát hiện thay đổi đáng kể:
+   - Lấy dữ liệu gần nhất từ recent buffer.
+   - Retrain Random Forest hoặc fine-tune LSTM.
+   - Tăng model version.
+   - Lưu model mới vào local model registry.
+7. Metrics được lưu theo từng window để quan sát model thay đổi theo thời gian.
+
+## 4. Các Thành Phần Chính
+
+### Stream simulator
+
+`src/drift_simulator.py` sinh synthetic IoT data gồm 4 giai đoạn drift. Dataset mặc định có:
+
+- 50.000 dòng.
+- 20 numeric features từ `feature_0` đến `feature_19`.
+- `timestamp`.
+- `attack_type`.
+- `label_binary`.
+- Actual drift points: `[12500, 25000, 37500]`.
+
+### Preprocessing
+
+`src/preprocessing.py` thực hiện:
+
+- Tự phát hiện label column.
+- Chuyển label thành binary.
+- Loại metadata không phù hợp như timestamp hoặc IP dạng text.
+- Giữ numeric features.
+- Thay `inf/-inf` bằng missing value.
+- Điền missing value bằng median.
+- Scale bằng `StandardScaler`.
+
+Scaler chỉ được fit trên train set. Stream/test set chỉ dùng `transform()` để tránh data leakage.
+
+### Static model
+
+Static baseline hiện dùng:
+
+- `RandomForestClassifier`
+- `n_estimators=100`
+- `class_weight="balanced"`
+- `n_jobs=-1`
+
+Project cũng có `SGDClassifier(loss="log_loss")` để mở rộng sang `partial_fit`.
+
+### ADWIN
+
+ADWIN trong thư viện River theo dõi error stream. Khi phân phối error thay đổi đủ lớn, detector lưu detected drift index.
+
+### Adaptive Random Forest
+
+Adaptive Random Forest sử dụng recent buffer dạng FIFO. Khi drift xảy ra:
+
+1. Lấy tối đa 5.000 dòng gần nhất.
+2. Train Random Forest mới.
+3. Tăng model version.
+4. Lưu model dưới dạng:
+
+```text
+cloud_model_storage/adaptive_rf_v{version}.joblib
+```
+
+### LSTM
+
+Tabular data được chuyển thành overlapping sequences:
+
+```text
+(samples, features)
+        ↓
+(sequences, timesteps, features)
+```
+
+Kiến trúc LSTM:
+
+```text
+LSTM(64)
+Dropout(0.3)
+Dense(32, activation="relu")
+Dropout(0.2)
+Dense(1, activation="sigmoid")
+```
+
+Compile configuration:
+
+```text
+optimizer = adam
+loss = binary_crossentropy
+metric = accuracy
+```
+
+### Adaptive LSTM
+
+Stream được xử lý theo window. Với mỗi window:
+
+1. Tạo sequence.
+2. Dự đoán bằng model hiện tại.
+3. Tính accuracy, precision, recall và F1.
+4. Đưa prediction error vào ADWIN.
+5. Nếu drift được phát hiện:
+   - Lấy recent buffer.
+   - Tạo sequence mới.
+   - Fine-tune LSTM 3 epoch.
+   - Lưu model version mới.
+
+Model adaptive được lưu dưới dạng:
+
+```text
+cloud_model_storage/lstm_adaptive_v{version}.keras
+```
+
+## 5. Cấu Trúc Thư Mục
 
 ```text
 iot-drift-online-learning/
 ├── api/
+│   └── main.py
 ├── cloud_model_storage/
+│   └── .gitkeep
 ├── dashboard/
+│   └── app.py
 ├── data/
-│   ├── processed/
 │   ├── raw/
-│   │   ├── CICIoT/
-│   │   └── TON_IoT/
+│   │   ├── TON_IoT/
+│   │   │   └── .gitkeep
+│   │   └── CICIoT/
+│   │       └── .gitkeep
+│   ├── processed/
+│   │   └── .gitkeep
 │   └── synthetic/
+│       └── .gitkeep
 ├── notebooks/
+│   └── .gitkeep
 ├── outputs/
 │   ├── figures/
-│   ├── logs/
-│   └── metrics/
+│   │   └── .gitkeep
+│   ├── metrics/
+│   │   └── .gitkeep
+│   └── logs/
+│       └── .gitkeep
 ├── scripts/
-└── src/
+│   ├── 00_generate_synthetic_data.py
+│   ├── 01_prepare_data.py
+│   ├── 02_train_static.py
+│   ├── 03_run_stream_adwin.py
+│   ├── 04_run_adaptive_static.py
+│   ├── 05_train_lstm.py
+│   ├── 06_run_adaptive_lstm.py
+│   ├── 07_compare_models.py
+│   └── 08_generate_experiment_report.py
+├── src/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── data_loader.py
+│   ├── preprocessing.py
+│   ├── drift_simulator.py
+│   ├── static_model.py
+│   ├── lstm_model.py
+│   ├── adwin_detector.py
+│   ├── adaptive_trainer.py
+│   ├── evaluation.py
+│   ├── model_registry.py
+│   ├── aws_storage.py
+│   └── utils.py
+├── .env.example
+├── .gitignore
+├── PROGRESS.md
+├── README.md
+└── requirements.txt
 ```
 
-## Cài Đặt
+Vai trò của các thư mục:
+
+| Thư mục | Mục đích |
+| --- | --- |
+| `data/raw/` | Chứa dataset gốc TON_IoT và CICIoT |
+| `data/processed/` | Chứa dữ liệu đã chuẩn hóa |
+| `data/synthetic/` | Chứa synthetic dataset dùng để demo |
+| `src/` | Chứa logic chính của pipeline |
+| `scripts/` | Chứa các entrypoint chạy experiment |
+| `cloud_model_storage/` | Mô phỏng cloud model registry |
+| `outputs/metrics/` | Chứa CSV/JSON metrics |
+| `outputs/figures/` | Chứa biểu đồ experiment |
+| `outputs/logs/` | Chứa log runtime trong tương lai |
+| `api/` | FastAPI prediction endpoint |
+| `dashboard/` | Streamlit experiment dashboard |
+
+## 6. Yêu Cầu Môi Trường
+
+Khuyến nghị:
+
+- Python 3.10 hoặc 3.11.
+- RAM tối thiểu 8 GB.
+- Có thể chạy bằng CPU.
+- Windows, Linux hoặc macOS.
+
+Các thư viện chính:
+
+- pandas
+- numpy
+- scikit-learn
+- matplotlib
+- plotly
+- river
+- tensorflow
+- joblib
+- fastapi
+- uvicorn
+- streamlit
+- boto3
+- python-dotenv
+
+Lưu ý: TensorFlow phiên bản mới trên native Windows chủ yếu chạy bằng CPU. Nếu cần GPU, có thể dùng WSL2 hoặc môi trường Linux phù hợp.
+
+## 7. Cài Đặt
+
+### Clone project
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+git clone <YOUR_REPOSITORY_URL>
+cd iot-drift-online-learning
 ```
 
-Trên macOS/Linux:
+### Tạo virtual environment trên Windows
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+Nếu PowerShell chặn activate script:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.venv\Scripts\Activate.ps1
+```
+
+### Tạo virtual environment trên macOS/Linux
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+```
+
+### Cài dependencies
+
+```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## Quy Ước Dữ Liệu Và Artifact
+### Cấu hình môi trường
 
-- Không commit dataset thật vào GitHub.
-- Đặt TON_IoT tại `data/raw/TON_IoT/`.
-- Đặt CICIoT tại `data/raw/CICIoT/`.
-- Dữ liệu đã xử lý lưu ở `data/processed/`.
-- Synthetic CSV sinh ra để test pipeline lưu ở `data/synthetic/`.
-- Metrics, figures và logs lưu ở `outputs/`.
-- Model artifact lưu ở `cloud_model_storage/`.
-- Không commit `.env`, AWS key, secret, token, dataset, model, output hoặc log.
+Project không yêu cầu `.env` để chạy local. Nếu cần cấu hình AWS trong tương lai:
 
-## Pipeline Dự Kiến
+```bash
+cp .env.example .env
+```
 
-1. `scripts/00_generate_synthetic_data.py`: tạo synthetic dataset để test.
-2. `scripts/01_prepare_data.py`: chuẩn hóa dữ liệu và tạo train/stream windows.
-3. `scripts/02_train_static.py`: train baseline static model.
-4. `scripts/03_run_stream_adwin.py`: chạy stream và ADWIN drift detection.
-5. `scripts/04_run_adaptive_static.py`: adaptive retraining với model truyền thống.
-6. `scripts/05_train_lstm.py`: train LSTM ban đầu.
-7. `scripts/06_run_adaptive_lstm.py`: fine-tune LSTM theo window khi drift.
-8. `scripts/07_compare_models.py`: so sánh static/adaptive.
-9. `scripts/08_generate_experiment_report.py`: tạo báo cáo kết quả.
+Trên Windows:
 
-## Metrics Báo Cáo
+```powershell
+Copy-Item .env.example .env
+```
 
-- Accuracy
-- Precision
-- Recall
-- F1-score
-- Detection delay
-- Số lần retrain/fine-tune
-- Thời gian retrain/fine-tune
-- Trade-off accuracy vs update cost
+Không commit `.env` hoặc credential thật lên GitHub.
 
-## Trạng Thái
+## 8. Thứ Tự Chạy Demo
 
-Skeleton project đã được tạo. Các module hiện là khung ban đầu để phát triển pipeline ở các bước tiếp theo.
+Chạy các command từ project root.
 
-## FastAPI Model Endpoint
+### Bước 1: Sinh synthetic dataset
 
-API tự động load model mới nhất trong `cloud_model_storage/` theo thứ tự:
+```bash
+python scripts/00_generate_synthetic_data.py
+```
 
-1. Adaptive LSTM version mới nhất.
-2. Adaptive Random Forest version mới nhất.
-3. Static Random Forest.
+Output chính:
 
-Khởi động API:
+```text
+data/synthetic/synthetic_iot_drift.csv
+outputs/metrics/synthetic_drift_points.json
+```
+
+### Bước 2: Train static Random Forest
+
+```bash
+python scripts/02_train_static.py
+```
+
+Output chính:
+
+```text
+cloud_model_storage/static_random_forest.joblib
+cloud_model_storage/preprocessor.joblib
+outputs/metrics/static_model_metrics.json
+outputs/metrics/static_window_metrics.csv
+outputs/figures/static_f1_over_time.png
+```
+
+### Bước 3: Chạy ADWIN trên static model
+
+```bash
+python scripts/03_run_stream_adwin.py
+```
+
+Output chính:
+
+```text
+outputs/metrics/adwin_detected_drifts.json
+outputs/metrics/adwin_detection_delay.csv
+outputs/figures/adwin_error_rate_over_time.png
+outputs/figures/adwin_f1_over_time.png
+```
+
+### Bước 4: Chạy Adaptive Random Forest
+
+```bash
+python scripts/04_run_adaptive_static.py
+```
+
+Output chính:
+
+```text
+cloud_model_storage/adaptive_rf_v0.joblib
+cloud_model_storage/adaptive_rf_v{version}.joblib
+outputs/metrics/adaptive_static_window_metrics.csv
+outputs/metrics/adaptive_static_retrain_log.csv
+outputs/metrics/adaptive_static_summary.json
+outputs/figures/static_vs_adaptive_f1.png
+```
+
+Nếu ADWIN không phát hiện drift thì không có model version mới và retrain log có thể chỉ chứa header.
+
+### Bước 5: Train LSTM ban đầu
+
+```bash
+python scripts/05_train_lstm.py
+```
+
+Output chính:
+
+```text
+cloud_model_storage/lstm_initial.keras
+cloud_model_storage/lstm_preprocessor.joblib
+outputs/metrics/lstm_initial_metrics.json
+outputs/figures/lstm_training_history.png
+```
+
+### Bước 6: Chạy Adaptive LSTM
+
+```bash
+python scripts/06_run_adaptive_lstm.py
+```
+
+Output chính:
+
+```text
+cloud_model_storage/lstm_adaptive_v{version}.keras
+outputs/metrics/adaptive_lstm_window_metrics.csv
+outputs/metrics/adaptive_lstm_retrain_log.csv
+outputs/metrics/adaptive_lstm_detected_drifts.json
+outputs/metrics/adaptive_lstm_summary.json
+outputs/figures/adaptive_lstm_f1_over_time.png
+outputs/figures/lstm_static_vs_adaptive.png
+```
+
+### Bước 7: So sánh các model
+
+```bash
+python scripts/07_compare_models.py
+```
+
+Output chính:
+
+```text
+outputs/metrics/model_comparison_summary.csv
+outputs/metrics/model_comparison_summary.json
+outputs/figures/compare_f1_over_time.png
+outputs/figures/compare_accuracy_over_time.png
+outputs/figures/compare_average_f1.png
+outputs/figures/accuracy_vs_update_cost.png
+```
+
+### Bước 8: Tạo báo cáo tự động
+
+```bash
+python scripts/08_generate_experiment_report.py
+```
+
+Báo cáo được tạo tại:
+
+```text
+outputs/experiment_report.md
+```
+
+### Bước 9: Chạy dashboard
+
+```bash
+streamlit run dashboard/app.py
+```
+
+Mở:
+
+```text
+http://127.0.0.1:8501
+```
+
+Dashboard có các tab:
+
+- Dataset Overview
+- Static Model Performance
+- ADWIN Drift Detection
+- Adaptive Model
+- Model Comparison
+
+### Bước 10: Chạy API
 
 ```bash
 uvicorn api.main:app --reload
 ```
 
-Mở Swagger UI tại `http://127.0.0.1:8000/docs`.
+Mở Swagger UI:
 
-Ví dụ request dự đoán một record:
+```text
+http://127.0.0.1:8000/docs
+```
+
+Lưu ý: cú pháp Uvicorn phải có `:app`. Lệnh `uvicorn api.main --reload` thiếu tên FastAPI application và không phải command chuẩn cho project này.
+
+## 9. Chạy Toàn Bộ Pipeline
+
+```bash
+python scripts/00_generate_synthetic_data.py
+python scripts/02_train_static.py
+python scripts/03_run_stream_adwin.py
+python scripts/04_run_adaptive_static.py
+python scripts/05_train_lstm.py
+python scripts/06_run_adaptive_lstm.py
+python scripts/07_compare_models.py
+python scripts/08_generate_experiment_report.py
+streamlit run dashboard/app.py
+```
+
+Chạy API ở terminal khác:
+
+```bash
+uvicorn api.main:app --reload
+```
+
+## 10. Sử Dụng Dataset Thật
+
+### TON_IoT
+
+Đặt file TON_IoT vào:
+
+```text
+data/raw/TON_IoT/
+```
+
+Ví dụ:
+
+```text
+data/raw/TON_IoT/Train_Test_Network.csv
+```
+
+Load bằng:
+
+```python
+from src.data_loader import load_ton_iot_dataset
+
+df = load_ton_iot_dataset("Train_Test_Network.csv")
+```
+
+### CICIoT
+
+Đặt file CICIoT vào:
+
+```text
+data/raw/CICIoT/
+```
+
+Ví dụ:
+
+```text
+data/raw/CICIoT/part-00000.csv
+```
+
+Load bằng:
+
+```python
+from src.data_loader import load_cic_iot_dataset
+
+df = load_cic_iot_dataset("part-00000.csv")
+```
+
+### Các bước tích hợp dataset thật
+
+1. Đặt file vào đúng thư mục.
+2. Cập nhật filename trong script experiment hoặc gọi loader với filename đúng.
+3. Kiểm tra label column bằng `detect_label_column()`.
+4. Nếu cần, truyền `label_col` cụ thể vào `create_binary_label()`.
+5. Xác định timestamp column.
+6. Sắp xếp và chia dữ liệu theo thời gian, không shuffle.
+7. Chạy preprocessing.
+8. Fit preprocessor chỉ trên train set.
+9. Chạy static/adaptive experiment.
+
+Ví dụ:
+
+```python
+from src.data_loader import load_ton_iot_dataset, time_based_split
+from src.preprocessing import create_binary_label, clean_features, Preprocessor
+
+df = load_ton_iot_dataset("Train_Test_Network.csv")
+df = create_binary_label(df, label_col="label")
+
+train_df, stream_df = time_based_split(
+    df,
+    train_ratio=0.6,
+    timestamp_col="timestamp",
+)
+
+X_train, y_train, feature_names = clean_features(train_df)
+X_stream, y_stream, _ = clean_features(stream_df)
+X_stream = X_stream[feature_names]
+
+preprocessor = Preprocessor()
+X_train_scaled = preprocessor.fit_transform(X_train)
+X_stream_scaled = preprocessor.transform(X_stream)
+```
+
+`scripts/01_prepare_data.py` hiện vẫn là bước cần hoàn thiện cho schema cụ thể của TON_IoT/CICIoT. Không nên giả định mọi phiên bản dataset có cùng tên label, timestamp hoặc feature columns.
+
+## 11. Các Chỉ Số Đánh Giá
+
+### Accuracy
+
+Tỷ lệ tổng số dự đoán đúng:
+
+```text
+Accuracy = (TP + TN) / (TP + TN + FP + FN)
+```
+
+Accuracy dễ hiểu nhưng có thể gây hiểu nhầm nếu dataset mất cân bằng.
+
+### Precision
+
+Trong các mẫu model dự đoán là attack, precision cho biết tỷ lệ attack thật:
+
+```text
+Precision = TP / (TP + FP)
+```
+
+Precision cao giúp giảm false alarm.
+
+### Recall
+
+Trong các attack thật, recall cho biết model phát hiện được bao nhiêu:
+
+```text
+Recall = TP / (TP + FN)
+```
+
+Trong intrusion detection, recall thường rất quan trọng vì false negative có thể bỏ sót tấn công.
+
+### F1-score
+
+Trung bình điều hòa của precision và recall:
+
+```text
+F1 = 2 × Precision × Recall / (Precision + Recall)
+```
+
+F1 phù hợp khi cần cân bằng false positive và false negative.
+
+### Detection delay
+
+Số sample từ actual drift point đến detected drift point:
+
+```text
+Detection delay = detected drift point - actual drift point
+```
+
+Delay càng thấp thì hệ thống phản ứng càng nhanh.
+
+### Retrain count
+
+Số lần ADWIN kích hoạt retraining hoặc fine-tuning.
+
+Retrain count quá cao có thể cho thấy:
+
+- Detector quá nhạy.
+- Model không ổn định.
+- Drift xảy ra liên tục.
+- Update cost lớn.
+
+### Retrain time
+
+Thời gian cần để train hoặc fine-tune model sau drift.
+
+### Update cost
+
+Update cost có thể gồm:
+
+- Retraining time.
+- CPU/GPU usage.
+- Memory usage.
+- Model storage.
+- Network bandwidth khi upload model lên cloud.
+- Downtime hoặc latency trong lúc đổi model.
+
+Project hiện đo chủ yếu bằng retrain count và retrain time.
+
+## 12. Kết Quả Demo Hiện Tại
+
+Kết quả phụ thuộc phiên bản thư viện, random seed và môi trường chạy. Một lần chạy gần nhất cho kết quả:
+
+| Model | Average Accuracy | Average Recall | Average F1 | Retrain Count | Update Time |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Static Random Forest | 0.9961 | 0.9918 | 0.9954 | 0 | 0.000 s |
+| Adaptive Random Forest | 0.9961 | 0.9918 | 0.9954 | 0 | 0.000 s |
+| Adaptive LSTM | 0.9637 | 0.9241 | 0.9584 | 1 | 1.834 s |
+
+Adaptive LSTM experiment:
+
+- Actual drift point: `37500`
+- Detected drift point: `38016`
+- Detection delay: `516` samples
+- Static LSTM overall F1: khoảng `0.9492`
+- Adaptive LSTM overall F1: khoảng `0.9573`
+- Final window F1: khoảng `0.9975`
+
+Random Forest đạt điểm rất cao trên synthetic data hiện tại, khiến error stream thay đổi chưa đủ mạnh để ADWIN kích hoạt adaptive retraining. Đây là hạn chế của kịch bản synthetic, không phải lỗi của detector.
+
+## 13. Ý Nghĩa Kết Quả
+
+### Static model
+
+Static model không thay đổi sau khi deploy. Trong kịch bản drift đủ mạnh, hiệu năng thường giảm vì model vẫn sử dụng pattern cũ.
+
+### Adaptive model
+
+Adaptive model có thể phục hồi sau retraining hoặc fine-tuning bằng recent data. Kết quả Adaptive LSTM cho thấy recall và F1 tăng sau khi model được cập nhật.
+
+### ADWIN
+
+ADWIN giúp xác định thời điểm prediction error thay đổi đáng kể. Detector không cần biết trước vị trí drift thật khi chạy online.
+
+### Trade-off
+
+Adaptive learning không miễn phí:
+
+- Có thể tăng accuracy, recall hoặc F1.
+- Cần thời gian retraining.
+- Cần lưu model version mới.
+- Có thể tăng CPU/GPU và memory usage.
+- Có thể phát sinh false alarm nếu detector quá nhạy.
+
+Vì vậy, model tốt nhất không chỉ là model có accuracy cao nhất. Cần cân bằng:
+
+- Chất lượng dự đoán.
+- Detection delay.
+- Tốc độ cập nhật.
+- Chi phí tài nguyên.
+- Độ ổn định của hệ thống.
+
+## 14. FastAPI Model Endpoint
+
+API tự chọn model trong `cloud_model_storage/` theo thứ tự:
+
+1. Adaptive LSTM version mới nhất.
+2. Adaptive Random Forest version mới nhất.
+3. Static Random Forest.
+
+Endpoints:
+
+| Method | Endpoint | Mục đích |
+| --- | --- | --- |
+| GET | `/` | Thông tin project |
+| GET | `/health` | Trạng thái API và model active |
+| GET | `/models` | Danh sách model local |
+| POST | `/predict` | Dự đoán một record |
+| POST | `/predict_batch` | Dự đoán nhiều record |
+
+Ví dụ request:
 
 ```json
 {
@@ -134,10 +795,311 @@ Ví dụ request dự đoán một record:
 }
 ```
 
-Endpoints:
+Ví dụ response:
 
-- `GET /`
-- `GET /health`
-- `GET /models`
-- `POST /predict`
-- `POST /predict_batch`
+```json
+{
+  "prediction": 0,
+  "label": "normal",
+  "model_name": "Adaptive LSTM",
+  "model_version": 1,
+  "confidence": 0.9999
+}
+```
+
+LSTM cần một chuỗi nhiều timestep. Với request đơn lẻ, API hiện lặp/pad record để tạo sequence đủ độ dài. Đây là giải pháp demo, chưa phải stateful production inference.
+
+## 15. Dashboard
+
+Dashboard đọc trực tiếp các file trong `outputs/metrics/` và `cloud_model_storage/`.
+
+Các chức năng:
+
+- Xem tổng quan synthetic dataset.
+- Xem phân phối normal/attack.
+- Xem phân phối attack type.
+- Xem static model metrics theo window.
+- Xem ADWIN detected drift và detection delay.
+- Chuyển giữa Adaptive Random Forest và Adaptive LSTM.
+- Xem retraining log.
+- So sánh model.
+- Xem trade-off F1/accuracy và update cost.
+
+Nếu file output chưa tồn tại, dashboard hiển thị warning và tiếp tục chạy.
+
+## 16. Báo Cáo Tự Động
+
+Script:
+
+```bash
+python scripts/08_generate_experiment_report.py
+```
+
+Đọc các metrics:
+
+```text
+outputs/metrics/static_model_metrics.json
+outputs/metrics/adwin_detection_delay.csv
+outputs/metrics/adaptive_static_summary.json
+outputs/metrics/adaptive_lstm_summary.json
+outputs/metrics/model_comparison_summary.csv
+```
+
+Tạo:
+
+```text
+outputs/experiment_report.md
+```
+
+Báo cáo gồm:
+
+- Tổng quan thực nghiệm.
+- Dataset.
+- Static model.
+- ADWIN.
+- Adaptive Random Forest.
+- Adaptive LSTM.
+- Detection delay.
+- Model comparison.
+- Trade-off.
+- Kết luận tự động.
+- Link tới các biểu đồ trong `outputs/figures/`.
+
+## 17. Model Registry Và Cloud Storage
+
+Hiện tại, cloud storage được mô phỏng bằng:
+
+```text
+cloud_model_storage/
+```
+
+Model được version hóa:
+
+```text
+adaptive_rf_v1.joblib
+adaptive_rf_v2.joblib
+lstm_adaptive_v1.keras
+lstm_adaptive_v2.keras
+```
+
+Trong tương lai, `src/aws_storage.py` có thể được mở rộng để:
+
+- Upload model lên Amazon S3.
+- Download model mới nhất.
+- Lưu metadata model.
+- Rollback model version.
+- Dùng IAM Role thay cho hard-coded credentials.
+
+## 18. An Toàn Khi Đưa Lên GitHub
+
+Project đã cấu hình `.gitignore` để không commit:
+
+- `.env`
+- Python cache
+- Virtual environment
+- Dataset raw/processed
+- Synthetic CSV
+- Outputs
+- Logs
+- Local model storage
+- Joblib/Pickle/Keras/H5 artifacts
+
+Không lưu trực tiếp:
+
+- AWS Access Key
+- AWS Secret Key
+- API token
+- Password
+- Private endpoint
+
+Chỉ commit `.env.example` với giá trị rỗng hoặc placeholder.
+
+## 19. Hạn Chế
+
+1. Synthetic drift chưa phản ánh đầy đủ độ phức tạp của traffic IoT thật.
+2. Random Forest hiện hoạt động quá tốt trên synthetic data nên ADWIN không trigger adaptive RF.
+3. LSTM online trong project thực chất là fine-tuning theo window, chưa phải online learning từng sample.
+4. Sequence context hiện được tạo riêng trong từng window, chưa giữ đầy đủ context xuyên biên window.
+5. Cloud model storage mới được mô phỏng bằng thư mục local.
+6. API LSTM phải pad dữ liệu khi request chưa đủ timestep.
+7. Hệ thống cần nhãn thật sau prediction để tạo error stream cho ADWIN.
+8. Trong hệ thống thực tế, nhãn có thể đến chậm hoặc không có sẵn.
+9. TON_IoT và CICIoT có nhiều phiên bản/schema khác nhau; cần mapping riêng.
+10. `scripts/01_prepare_data.py` chưa hoàn thiện cho dataset thật.
+11. Chưa có automated test suite đầy đủ.
+12. Dependencies hiện chưa pin version, nên kết quả có thể thay đổi nhẹ giữa môi trường.
+13. Chưa đánh giá resource usage chi tiết như RAM, CPU, GPU hoặc inference latency.
+
+## 20. Hướng Phát Triển
+
+### Cloud deployment
+
+- Deploy FastAPI lên AWS ECS, EC2 hoặc Lambda phù hợp.
+- Lưu model trên Amazon S3.
+- Dùng SageMaker Model Registry.
+- Deploy trên GCP Vertex AI hoặc Azure Machine Learning.
+
+### Real-time IoT streaming
+
+- Dùng MQTT để nhận telemetry từ IoT devices.
+- Dùng Apache Kafka làm event stream.
+- Dùng AWS IoT Core.
+- Dùng Spark Structured Streaming hoặc Flink.
+
+### Drift detectors
+
+Thử thêm:
+
+- DDM
+- EDDM
+- Page-Hinkley
+- KSWIN
+- HDDM
+
+Sau đó so sánh:
+
+- Detection delay.
+- False alarm.
+- Missed drift.
+- Memory cost.
+- Processing time.
+
+### Online models
+
+Thử thêm:
+
+- Hoeffding Tree.
+- Adaptive Random Forest của River.
+- Online Logistic Regression.
+- Naive Bayes online.
+- LearnPPNSE hoặc ensemble online.
+
+### Bài toán nâng cao
+
+- Multi-class attack classification.
+- Unknown attack detection.
+- Anomaly detection không giám sát.
+- Delayed-label learning.
+- Continual learning.
+- Federated learning cho nhiều IoT gateway.
+- Model rollback nếu retraining làm hiệu năng giảm.
+- Drift explanation và feature-distribution monitoring.
+
+## 21. Troubleshooting
+
+### Không tìm thấy synthetic dataset
+
+Chạy:
+
+```bash
+python scripts/00_generate_synthetic_data.py
+```
+
+### Không tìm thấy static model
+
+Chạy:
+
+```bash
+python scripts/02_train_static.py
+```
+
+### Không tìm thấy initial LSTM
+
+Chạy:
+
+```bash
+python scripts/05_train_lstm.py
+```
+
+### ADWIN không phát hiện drift
+
+Điều này không nhất thiết là lỗi. Các nguyên nhân có thể gồm:
+
+- Model vẫn dự đoán tốt sau drift.
+- Prediction error thay đổi chưa đủ mạnh.
+- `delta` chưa phù hợp.
+- Synthetic drift tác động lên feature nhưng không làm decision boundary thay đổi đủ lớn.
+
+Có thể thử:
+
+- Tăng mức độ feature shift.
+- Đảo hoặc thay đổi decision boundary.
+- Tăng label noise sau drift.
+- Thay đổi attack ratio mạnh hơn.
+- Thử detector khác.
+
+### TensorFlow chạy chậm
+
+- Giảm epochs.
+- Tăng batch size nếu đủ RAM.
+- Giảm số dòng.
+- Giảm LSTM units.
+- Dùng WSL2/Linux nếu cần GPU.
+
+### Dashboard thiếu dữ liệu
+
+Chạy pipeline từ script `00` đến `08` trước khi mở dashboard.
+
+### API báo không có model
+
+Chạy ít nhất một trong các script:
+
+```bash
+python scripts/02_train_static.py
+python scripts/05_train_lstm.py
+python scripts/06_run_adaptive_lstm.py
+```
+
+## 22. Trạng Thái Project
+
+Các phần đã hoạt động:
+
+- Synthetic stream generation.
+- Data loading và preprocessing.
+- Static Random Forest.
+- Window evaluation.
+- ADWIN detector.
+- Adaptive Random Forest pipeline.
+- Initial LSTM.
+- Adaptive LSTM.
+- Model comparison.
+- Experiment report.
+- FastAPI endpoint.
+- Streamlit dashboard.
+
+Các phần cần tiếp tục:
+
+- Chuẩn hóa TON_IoT/CICIoT thật.
+- Hoàn thiện `scripts/01_prepare_data.py`.
+- AWS S3 storage.
+- Automated tests.
+- Production stream integration.
+
+Xem tiến độ chi tiết tại [PROGRESS.md](PROGRESS.md).
+
+## 23. Tài Liệu Kết Quả
+
+Sau khi chạy đầy đủ pipeline:
+
+- Báo cáo: `outputs/experiment_report.md`
+- Metrics: `outputs/metrics/`
+- Figures: `outputs/figures/`
+- Models: `cloud_model_storage/`
+
+Các thư mục này được giữ local và không đưa lên GitHub theo cấu hình mặc định.
+
+## 24. Tóm Tắt
+
+Project minh họa một pipeline hoàn chỉnh cho drift detection trong IoT:
+
+```text
+IoT stream
+→ prediction
+→ error monitoring
+→ ADWIN drift detection
+→ adaptive retraining/fine-tuning
+→ versioned model storage
+→ evaluation and visualization
+```
+
+Kết quả cho thấy adaptive learning có thể giúp model phục hồi sau khi pattern dữ liệu thay đổi. Tuy nhiên, lợi ích về accuracy/F1 luôn cần được đánh giá cùng detection delay và chi phí cập nhật. Đây là nền tảng phù hợp để phát triển tiếp thành đồ án với dataset TON_IoT/CICIoT thật hoặc triển khai trên cloud.
