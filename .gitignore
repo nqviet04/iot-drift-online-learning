@@ -61,6 +61,9 @@ outputs/logs/**
 cloud_model_storage/**
 !cloud_model_storage/.gitkeep
 
+# Local demo backups
+demo_backups/
+
 # Model artifacts
 *.joblib
 *.pkl

@@ -514,6 +514,7 @@ Dashboard có các tab:
 - ADWIN Drift Detection
 - Adaptive Model
 - Model Comparison
+- Admin Pipeline
 
 ### Bước 10: Chạy API
 
@@ -530,6 +531,13 @@ http://127.0.0.1:8000/docs
 Lưu ý: cú pháp Uvicorn phải có `:app`. Lệnh `uvicorn api.main --reload` thiếu tên FastAPI application và không phải command chuẩn cho project này.
 
 ## 9. Chạy Toàn Bộ Pipeline
+
+Project có hai cách chạy:
+
+1. Chạy từng script bằng terminal để dễ theo dõi và debug từng bước.
+2. Chạy bằng tab **Admin Pipeline** trong Streamlit dashboard.
+
+### Cách 1: Terminal
 
 ```bash
 python scripts/00_generate_synthetic_data.py
@@ -548,6 +556,27 @@ Upload artifact lên Azure Blob Storage là bước tùy chọn:
 ```bash
 python scripts/09_upload_models_to_azure.py
 ```
+
+### Cách 2: Streamlit Admin Pipeline
+
+Khởi động dashboard:
+
+```bash
+streamlit run dashboard/app.py
+```
+
+Mở tab **Admin Pipeline**. Tại đây có thể chạy từng script hoặc chọn
+**Run Full Pipeline**. Full Pipeline hỗ trợ:
+
+- `Include LSTM`: chạy thêm initial LSTM và adaptive LSTM.
+- `Upload to Azure after completion`: upload models, metrics và figures sau khi
+  các bước local hoàn tất.
+
+Dashboard hiển thị command, thời gian bắt đầu/kết thúc, trạng thái, stdout,
+stderr và file output quan trọng. Pipeline dừng tại bước đầu tiên bị lỗi.
+
+Không public tab Admin Pipeline nếu dashboard được deploy lên internet, vì tab
+này có quyền khởi chạy các tiến trình huấn luyện trên máy chủ.
 
 Chạy API ở terminal khác:
 
@@ -846,8 +875,48 @@ Các chức năng:
 - Xem retraining log.
 - So sánh model.
 - Xem trade-off F1/accuracy và update cost.
+- Chạy từng script bằng tab Admin Pipeline.
+- Chạy Full Pipeline có hoặc không có LSTM.
+- Upload artifact lên Azure sau khi pipeline hoàn tất.
+- Xem trạng thái các output quan trọng và log stdout/stderr.
 
 Nếu file output chưa tồn tại, dashboard hiển thị warning và tiếp tục chạy.
+
+Admin Pipeline chỉ sử dụng danh sách command cố định trong source code, không
+cho phép nhập shell command tùy ý. Connection string và secret trong environment
+được che trước khi log được hiển thị.
+
+### Reset demo và chạy lại từ đầu
+
+Trong tab **Admin Pipeline**, khu vực **Demo Reset Tools** dùng khi cần:
+
+- Xóa kết quả của lần demo trước để trình bày pipeline từ trạng thái ban đầu.
+- Chạy lại experiment với output/model mới.
+- Kiểm tra rõ script nào tạo ra từng artifact.
+
+Nên bấm **Backup Current Results** trước khi reset. Dashboard copy `outputs/`,
+`cloud_model_storage/` và `data/synthetic/` vào:
+
+```text
+demo_backups/run_YYYYMMDD_HHMMSS/
+```
+
+Thư mục `demo_backups/` chỉ lưu local và đã bị `.gitignore` chặn.
+
+Để reset:
+
+1. Chọn `outputs/`, `cloud_model_storage/` và/hoặc synthetic CSV/JSON.
+2. Chọn **I understand this will delete generated demo files**.
+3. Nhập chính xác `RESET`.
+4. Bấm **Reset Demo Outputs**.
+
+Reset không xóa source code, dataset trong `data/raw/`, `.env`, tài liệu project
+hoặc dữ liệu đã upload lên Azure Blob Storage. Các thư mục output/model cần
+thiết được tự động tạo lại.
+
+Sau khi reset thành công, chọn **Include LSTM** nếu cần và bấm
+**Run Full Pipeline From Scratch**. Không đóng dashboard trong lúc pipeline
+đang chạy; LSTM có thể mất vài phút.
 
 ## 16. Báo Cáo Tự Động
 
