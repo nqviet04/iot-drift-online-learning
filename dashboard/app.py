@@ -164,6 +164,9 @@ METRIC_OPTIONS = {
     "Accuracy": "accuracy",
     "Recall": "recall",
 }
+PIPELINE_REFRESH_MESSAGE = (
+    "Pipeline completed successfully. Dashboard data refreshed."
+)
 
 
 st.set_page_config(
@@ -173,16 +176,16 @@ st.set_page_config(
 
 
 @st.cache_data(show_spinner=False)
-def _read_csv_cached(path: str, modified_time: float) -> pd.DataFrame:
+def _read_csv_cached(path: str, file_mtime_ns: int) -> pd.DataFrame:
     """Read a CSV and invalidate cache when the file changes."""
-    del modified_time
+    del file_mtime_ns
     return pd.read_csv(path)
 
 
 @st.cache_data(show_spinner=False)
-def _read_json_cached(path: str, modified_time: float) -> Any:
+def _read_json_cached(path: str, file_mtime_ns: int) -> Any:
     """Read JSON and invalidate cache when the file changes."""
-    del modified_time
+    del file_mtime_ns
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
@@ -192,7 +195,7 @@ def load_csv(path: Path, label: str) -> pd.DataFrame | None:
         st.warning(f"Chưa có {label}: `{path.relative_to(ROOT_DIR)}`")
         return None
     try:
-        return _read_csv_cached(str(path), path.stat().st_mtime)
+        return _read_csv_cached(str(path), path.stat().st_mtime_ns)
     except Exception as exc:
         st.warning(f"Không thể đọc {label}: {exc}")
         return None
@@ -204,7 +207,7 @@ def load_json(path: Path, label: str) -> Any | None:
         st.warning(f"Chưa có {label}: `{path.relative_to(ROOT_DIR)}`")
         return None
     try:
-        return _read_json_cached(str(path), path.stat().st_mtime)
+        return _read_json_cached(str(path), path.stat().st_mtime_ns)
     except Exception as exc:
         st.warning(f"Không thể đọc {label}: {exc}")
         return None
@@ -321,6 +324,17 @@ def model_inventory() -> pd.DataFrame:
 def _format_time(value: datetime) -> str:
     """Format one local timestamp for pipeline logs."""
     return value.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def refresh_dashboard_data(message: str) -> None:
+    """Clear Streamlit caches, remember the refresh, and rerun the app."""
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.session_state["last_pipeline_run"] = _format_time(
+        datetime.now().astimezone()
+    )
+    st.session_state["dashboard_flash_message"] = message
+    st.rerun()
 
 
 def _redact_sensitive_text(text: str | None) -> str:
@@ -602,7 +616,9 @@ def run_fixed_script(step_key: str) -> dict[str, Any]:
 
     specification = SCRIPT_COMMANDS[step_key]
     script_path = ROOT_DIR / specification["script"]
-    display_command = f"python {specification['script']}"
+    display_command = subprocess.list2cmdline(
+        [sys.executable, str(script_path)]
+    )
     started_at = datetime.now().astimezone()
 
     result: dict[str, Any] = {
@@ -732,7 +748,12 @@ def run_pipeline_steps(step_keys: list[str]) -> list[dict[str, Any]]:
             expanded=True,
         ) as status:
             st.code(
-                f"python {specification['script']}",
+                subprocess.list2cmdline(
+                    [
+                        sys.executable,
+                        str(ROOT_DIR / specification["script"]),
+                    ]
+                ),
                 language="powershell",
             )
             st.write(f"Started: {_format_time(datetime.now().astimezone())}")
@@ -760,8 +781,18 @@ def run_pipeline_steps(step_keys: list[str]) -> list[dict[str, Any]]:
             st.warning("Pipeline stopped after the failed step.")
             break
 
-    st.cache_data.clear()
     return results
+
+
+def pipeline_completed_successfully(
+    results: list[dict[str, Any]],
+    expected_steps: list[str],
+) -> bool:
+    """Return whether every requested pipeline step completed successfully."""
+    return (
+        len(results) == len(expected_steps)
+        and all(result["status"] == "Success" for result in results)
+    )
 
 
 st.title("Phát hiện Drift trong hệ thống IoT bằng Online Learning")
@@ -770,8 +801,23 @@ st.caption(
     "và fine-tune LSTM theo luồng dữ liệu."
 )
 
+flash_message = st.session_state.pop("dashboard_flash_message", None)
+if flash_message:
+    st.success(flash_message)
+
 metric_files = metric_file_options()
 st.sidebar.header("Dashboard Controls")
+if st.sidebar.button(
+    "Refresh Dashboard Data",
+    key="refresh_dashboard_data",
+    width="stretch",
+):
+    refresh_dashboard_data("Dashboard data refreshed.")
+
+last_pipeline_run = st.session_state.get("last_pipeline_run")
+if last_pipeline_run:
+    st.sidebar.caption(f"Last refresh: {last_pipeline_run}")
+
 selected_metric_label = st.sidebar.selectbox(
     "Biểu đồ",
     options=list(METRIC_OPTIONS),
@@ -1191,7 +1237,10 @@ with admin_tab:
     )
 
     if clicked_step is not None:
-        run_pipeline_steps([clicked_step])
+        selected_steps = [clicked_step]
+        results = run_pipeline_steps(selected_steps)
+        if pipeline_completed_successfully(results, selected_steps):
+            refresh_dashboard_data(PIPELINE_REFRESH_MESSAGE)
 
     if run_full_pipeline:
         full_pipeline_steps = BASE_FULL_PIPELINE.copy()
@@ -1200,7 +1249,9 @@ with admin_tab:
         full_pipeline_steps.extend(FINAL_PIPELINE)
         if upload_after_completion:
             full_pipeline_steps.append("upload_azure")
-        run_pipeline_steps(full_pipeline_steps)
+        results = run_pipeline_steps(full_pipeline_steps)
+        if pipeline_completed_successfully(results, full_pipeline_steps):
+            refresh_dashboard_data(PIPELINE_REFRESH_MESSAGE)
 
     st.divider()
     st.subheader("Demo Reset Tools")
@@ -1371,7 +1422,9 @@ with admin_tab:
         if scratch_include_lstm:
             scratch_steps.extend(LSTM_PIPELINE)
         scratch_steps.extend(FINAL_PIPELINE)
-        run_pipeline_steps(scratch_steps)
+        results = run_pipeline_steps(scratch_steps)
+        if pipeline_completed_successfully(results, scratch_steps):
+            refresh_dashboard_data(PIPELINE_REFRESH_MESSAGE)
 
     st.divider()
     st.subheader("Pipeline Status")
