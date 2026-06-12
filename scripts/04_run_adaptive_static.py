@@ -1,5 +1,6 @@
 """Compare a static Random Forest with ADWIN-triggered adaptive retraining."""
 
+import argparse
 import copy
 import json
 import sys
@@ -19,7 +20,9 @@ from src.adaptive_trainer import (
     save_retraining_log,
 )
 from src.adwin_detector import ADWINDriftDetector
+from src.aws_storage import upload_file_to_s3
 from src.config import (
+    AWS_S3_BUCKET_NAME,
     CLOUD_MODEL_DIR,
     FIGURE_DIR,
     METRIC_DIR,
@@ -187,7 +190,7 @@ def _plot_f1_comparison(
     return COMPARISON_PLOT_PATH
 
 
-def main() -> None:
+def main(upload_to_s3: bool = False) -> None:
     """Run the static-vs-adaptive stream experiment."""
     df = create_binary_label(load_synthetic_dataset())
     train_df, stream_df = time_based_split(
@@ -260,9 +263,26 @@ def main() -> None:
                 )
                 X_recent, y_recent = buffer.get_data()
                 retrain_info = adaptive_trainer.retrain(X_recent, y_recent)
+                model_path = Path(retrain_info["model_path"])
+                s3_key = f"models/{model_path.name}"
+                s3_upload_success = (
+                    upload_file_to_s3(
+                        model_path,
+                        AWS_S3_BUCKET_NAME,
+                        s3_key,
+                    )
+                    if upload_to_s3
+                    else None
+                )
+                if upload_to_s3:
+                    upload_status = "uploaded" if s3_upload_success else "failed"
+                    print(f"[S3] {upload_status}: {s3_key}")
                 retrain_record = {
                     "detected_drift_index": absolute_index,
                     **retrain_info,
+                    "s3_upload_requested": upload_to_s3,
+                    "s3_upload_success": s3_upload_success,
+                    "s3_key": s3_key if upload_to_s3 else None,
                 }
                 retrain_records.append(retrain_record)
                 print(
@@ -328,6 +348,11 @@ def main() -> None:
         "average_retrain_time_seconds": (
             total_retrain_time / len(retrain_records) if retrain_records else 0.0
         ),
+        "s3_upload_requested": upload_to_s3,
+        "s3_upload_success_count": sum(
+            record.get("s3_upload_success") is True
+            for record in retrain_records
+        ),
         "static_metrics": static_metrics,
         "adaptive_metrics": adaptive_metrics,
         "adaptive_minus_static_f1": adaptive_metrics["f1"] - static_metrics["f1"],
@@ -353,5 +378,17 @@ def main() -> None:
     print(f"Summary: {_relative(SUMMARY_PATH)}")
 
 
+def _parse_args() -> argparse.Namespace:
+    """Parse optional cloud-upload arguments."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--upload-s3",
+        action="store_true",
+        help="Upload each newly retrained adaptive RF model to S3.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    args = _parse_args()
+    main(upload_to_s3=args.upload_s3)

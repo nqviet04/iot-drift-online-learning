@@ -1,5 +1,6 @@
 """Run ADWIN-triggered online fine-tuning for the initial LSTM model."""
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -15,7 +16,9 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.adaptive_trainer import RecentBuffer, save_retraining_log
 from src.adwin_detector import ADWINDriftDetector
+from src.aws_storage import upload_file_to_s3
 from src.config import (
+    AWS_S3_BUCKET_NAME,
     CLOUD_MODEL_DIR,
     FIGURE_DIR,
     LSTM_TIMESTEPS,
@@ -168,7 +171,7 @@ def _plot_static_vs_adaptive(
     return COMPARISON_PLOT_PATH
 
 
-def main() -> None:
+def main(upload_to_s3: bool = False) -> None:
     """Evaluate LSTM windows and fine-tune after ADWIN drift detections."""
     _require_initial_artifacts()
 
@@ -307,6 +310,19 @@ def main() -> None:
                 CLOUD_MODEL_DIR / f"lstm_adaptive_v{model_version}.keras"
             )
             save_lstm_model(adaptive_model, model_path)
+            s3_key = f"models/{model_path.name}"
+            s3_upload_success = (
+                upload_file_to_s3(
+                    model_path,
+                    AWS_S3_BUCKET_NAME,
+                    s3_key,
+                )
+                if upload_to_s3
+                else None
+            )
+            if upload_to_s3:
+                upload_status = "uploaded" if s3_upload_success else "failed"
+                print(f"[S3] {upload_status}: {s3_key}")
 
             retrain_record = {
                 "window_id": window_id,
@@ -318,6 +334,9 @@ def main() -> None:
                 "epochs": FINE_TUNE_EPOCHS,
                 "batch_size": FINE_TUNE_BATCH_SIZE,
                 "model_path": str(_relative(model_path)),
+                "s3_upload_requested": upload_to_s3,
+                "s3_upload_success": s3_upload_success,
+                "s3_key": s3_key if upload_to_s3 else None,
             }
             retrain_records.append(retrain_record)
             print(
@@ -408,6 +427,11 @@ def main() -> None:
         ),
         "total_retrain_time_seconds": float(sum(retrain_times)),
         "final_model_version": model_version,
+        "s3_upload_requested": upload_to_s3,
+        "s3_upload_success_count": sum(
+            record.get("s3_upload_success") is True
+            for record in retrain_records
+        ),
         "final_f1": float(adaptive_f1_values.iloc[-1]),
         "best_f1": float(adaptive_f1_values.max()),
         "worst_f1": float(adaptive_f1_values.min()),
@@ -445,5 +469,17 @@ def main() -> None:
     print(f"Summary: {_relative(SUMMARY_PATH)}")
 
 
+def _parse_args() -> argparse.Namespace:
+    """Parse optional cloud-upload arguments."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--upload-s3",
+        action="store_true",
+        help="Upload each newly fine-tuned LSTM model to S3.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    args = _parse_args()
+    main(upload_to_s3=args.upload_s3)

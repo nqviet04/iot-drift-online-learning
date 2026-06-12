@@ -38,7 +38,7 @@ Các mục tiêu chính của đồ án:
 7. Đo số lần retrain, thời gian retrain và model version.
 8. Phân tích trade-off giữa accuracy/F1 và update cost.
 9. Mô phỏng cloud model storage bằng thư mục local.
-10. Chuẩn bị kiến trúc để có thể mở rộng lên AWS S3 hoặc nền tảng cloud khác.
+10. Đồng bộ model, metrics và figures lên Azure Blob Storage.
 
 ## 2. Bài Toán Concept Drift Trong IoT
 
@@ -232,7 +232,9 @@ iot-drift-online-learning/
 │   ├── 05_train_lstm.py
 │   ├── 06_run_adaptive_lstm.py
 │   ├── 07_compare_models.py
-│   └── 08_generate_experiment_report.py
+│   ├── 08_generate_experiment_report.py
+│   ├── 09_upload_models_to_azure.py
+│   └── 09_upload_models_to_s3.py
 ├── src/
 │   ├── __init__.py
 │   ├── config.py
@@ -245,6 +247,7 @@ iot-drift-online-learning/
 │   ├── adaptive_trainer.py
 │   ├── evaluation.py
 │   ├── model_registry.py
+│   ├── azure_storage.py
 │   ├── aws_storage.py
 │   └── utils.py
 ├── .env.example
@@ -336,7 +339,8 @@ pip install -r requirements.txt
 
 ### Cấu hình môi trường
 
-Project không yêu cầu `.env` để chạy local. Nếu cần cấu hình AWS trong tương lai:
+Project không yêu cầu `.env` để chạy pipeline local. Để sử dụng Azure Blob
+Storage:
 
 ```bash
 cp .env.example .env
@@ -349,6 +353,17 @@ Copy-Item .env.example .env
 ```
 
 Không commit `.env` hoặc credential thật lên GitHub.
+
+Các biến Azure cần cấu hình:
+
+```dotenv
+AZURE_STORAGE_CONNECTION_STRING=
+AZURE_BLOB_CONTAINER_NAME=iot-drift-models
+```
+
+Code không in connection string ra terminal. Nếu thiếu connection string,
+container hoặc Azure SDK, thao tác cloud được bỏ qua với warning và pipeline
+local vẫn tiếp tục.
 
 ## 8. Thứ Tự Chạy Demo
 
@@ -526,6 +541,12 @@ python scripts/06_run_adaptive_lstm.py
 python scripts/07_compare_models.py
 python scripts/08_generate_experiment_report.py
 streamlit run dashboard/app.py
+```
+
+Upload artifact lên Azure Blob Storage là bước tùy chọn:
+
+```bash
+python scripts/09_upload_models_to_azure.py
 ```
 
 Chạy API ở terminal khác:
@@ -868,7 +889,7 @@ Báo cáo gồm:
 
 ## 17. Model Registry Và Cloud Storage
 
-Hiện tại, cloud storage được mô phỏng bằng:
+Model luôn được lưu local trước trong:
 
 ```text
 cloud_model_storage/
@@ -883,13 +904,91 @@ lstm_adaptive_v1.keras
 lstm_adaptive_v2.keras
 ```
 
-Trong tương lai, `src/aws_storage.py` có thể được mở rộng để:
+Cloud storage chính của project là **Azure Blob Storage**.
 
-- Upload model lên Amazon S3.
-- Download model mới nhất.
-- Lưu metadata model.
-- Rollback model version.
-- Dùng IAM Role thay cho hard-coded credentials.
+### Tạo Azure Storage Account
+
+1. Đăng nhập [Azure Portal](https://portal.azure.com/).
+2. Tìm **Storage accounts** và chọn **Create**.
+3. Chọn subscription, resource group và region phù hợp.
+4. Đặt tên storage account duy nhất, dùng chữ thường và số.
+5. Với project môn học, có thể dùng Standard performance và LRS redundancy.
+
+Hướng dẫn chính thức:
+[Create an Azure Storage Account](https://learn.microsoft.com/azure/storage/common/storage-account-create).
+
+### Tạo Blob Container
+
+1. Mở storage account vừa tạo.
+2. Chọn **Data storage → Containers**.
+3. Chọn **+ Container**.
+4. Đặt tên `iot-drift-models`.
+5. Giữ anonymous access ở trạng thái private.
+
+Tên container phải viết thường. Hướng dẫn:
+[Manage blob containers](https://learn.microsoft.com/azure/storage/blobs/blob-containers-portal).
+
+### Lấy Connection String
+
+Trong storage account, mở **Security + networking → Access keys**, chọn
+**Show keys**, sau đó sao chép **Connection string** của một key.
+
+Connection string chứa account key và phải được xem như secret. Không chụp màn
+hình, không ghi vào source code và không commit lên GitHub. Trong production nên
+chuyển sang Managed Identity hoặc `DefaultAzureCredential`.
+
+### Cấu hình `.env`
+
+Tạo `.env` local từ `.env.example`, sau đó điền:
+
+```dotenv
+AZURE_STORAGE_CONNECTION_STRING=your_connection_string
+AZURE_BLOB_CONTAINER_NAME=iot-drift-models
+```
+
+File `.env` đã bị `.gitignore` chặn. Tuyệt đối không commit file này.
+
+### Upload toàn bộ artifact lên Azure
+
+```bash
+python scripts/09_upload_models_to_azure.py
+```
+
+Script upload:
+
+- `cloud_model_storage/*` vào `models/`.
+- `outputs/metrics/*` vào `metrics/`.
+- `outputs/figures/*` vào `figures/`.
+
+Cấu trúc blob:
+
+```text
+models/static_random_forest.joblib
+models/preprocessor.joblib
+models/adaptive_rf_v1.joblib
+models/lstm_initial.keras
+models/lstm_adaptive_v1.keras
+metrics/static_model_metrics.json
+metrics/model_comparison_summary.csv
+figures/static_vs_adaptive_f1.png
+```
+
+Nếu thiếu connection string, container hoặc thư viện Azure, script in warning
+và dừng an toàn. Model local và kết quả experiment không bị ảnh hưởng.
+
+### Kiểm tra trên Azure Portal
+
+Mở **Storage account → Data storage → Containers → iot-drift-models**, sau đó
+kiểm tra các prefix `models/`, `metrics/` và `figures/`.
+
+Module `src/azure_storage.py` hỗ trợ upload, download, list blob, list model và
+lấy model mới nhất theo `last_modified`.
+
+### AWS S3 tương thích cũ
+
+Các file `src/aws_storage.py` và `scripts/09_upload_models_to_s3.py` vẫn được
+giữ để tương thích. Azure Blob Storage là lựa chọn được ưu tiên trong README và
+luồng demo mới.
 
 ## 18. An Toàn Khi Đưa Lên GitHub
 
@@ -907,6 +1006,7 @@ Project đã cấu hình `.gitignore` để không commit:
 
 Không lưu trực tiếp:
 
+- Azure Storage connection string
 - AWS Access Key
 - AWS Secret Key
 - API token
@@ -922,7 +1022,7 @@ Chỉ commit `.env.example` với giá trị rỗng hoặc placeholder.
 3. Với split 60/40, stream hiện chỉ chứa drift point `37500`; hai drift trước nằm trong train.
 4. LSTM online trong project thực chất là fine-tuning theo window, chưa phải online learning từng sample.
 5. Adaptive LSTM đã giữ context xuyên biên window, nhưng effective update latency sau khi kết thúc window chưa được đo riêng.
-6. Cloud model storage mới được mô phỏng bằng thư mục local.
+6. Azure Blob đã được tích hợp nhưng chưa kiểm thử với Storage Account thật.
 7. API LSTM phải pad dữ liệu khi request chưa đủ timestep.
 8. Hệ thống cần nhãn thật sau prediction để tạo error stream cho ADWIN.
 9. Trong hệ thống thực tế, nhãn có thể đến chậm hoặc không có sẵn.
@@ -936,10 +1036,10 @@ Chỉ commit `.env.example` với giá trị rỗng hoặc placeholder.
 
 ### Cloud deployment
 
-- Deploy FastAPI lên AWS ECS, EC2 hoặc Lambda phù hợp.
-- Lưu model trên Amazon S3.
-- Dùng SageMaker Model Registry.
-- Deploy trên GCP Vertex AI hoặc Azure Machine Learning.
+- Deploy FastAPI lên Azure App Service hoặc Azure Container Apps.
+- Dùng Managed Identity thay cho connection string khi deploy.
+- Tích hợp Azure Machine Learning Model Registry.
+- AWS S3/SageMaker và GCP Vertex AI vẫn là các hướng thay thế.
 
 ### Real-time IoT streaming
 
@@ -1068,12 +1168,14 @@ Các phần đã hoạt động:
 - Experiment report.
 - FastAPI endpoint.
 - Streamlit dashboard.
+- Azure Blob Storage upload/download utilities.
+- Azure bulk upload script cho models, metrics và figures.
+- Legacy AWS S3 compatibility utilities.
 
 Các phần cần tiếp tục:
 
 - Chuẩn hóa TON_IoT/CICIoT thật.
 - Hoàn thiện `scripts/01_prepare_data.py`.
-- AWS S3 storage.
 - Automated tests.
 - Production stream integration.
 

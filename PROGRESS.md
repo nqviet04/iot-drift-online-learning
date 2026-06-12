@@ -152,6 +152,33 @@
 - Nếu thiếu metrics file, script ghi chú “Chưa có dữ liệu” và không crash.
 - Report hiện có 132 dòng và 11 image links hợp lệ.
 
+### AWS S3 storage
+
+- Hoàn thành `src/aws_storage.py`.
+- Hỗ trợ upload, download, list model và lấy model mới nhất theo `LastModified`.
+- Hoàn thành `scripts/09_upload_models_to_s3.py`.
+- Script ánh xạ:
+  - `cloud_model_storage/` → `models/`.
+  - `outputs/metrics/` → `metrics/`.
+  - `outputs/figures/` → `figures/`.
+- Adaptive Random Forest và Adaptive LSTM hỗ trợ cờ `--upload-s3`.
+- Nếu thiếu credential, bucket hoặc `boto3`, thao tác S3 được bỏ qua với warning và pipeline không crash.
+- Credential chỉ đọc từ biến môi trường và không được in ra terminal.
+
+### Azure Blob Storage
+
+- Hoàn thành `src/azure_storage.py`.
+- Hỗ trợ upload, download, list blob, list model và lấy model mới nhất theo `last_modified`.
+- Hoàn thành `scripts/09_upload_models_to_azure.py`.
+- Script ánh xạ:
+  - `cloud_model_storage/` → `models/`.
+  - `outputs/metrics/` → `metrics/`.
+  - `outputs/figures/` → `figures/`.
+- Azure Blob Storage là cloud storage được ưu tiên trong README.
+- Connection string và container chỉ đọc từ biến môi trường.
+- Không in connection string ra terminal.
+- Nếu thiếu cấu hình hoặc Azure SDK, script dừng an toàn và không ảnh hưởng pipeline local.
+
 ### Project documentation
 
 - Viết lại `README.md` chi tiết bằng tiếng Việt.
@@ -181,6 +208,8 @@ python scripts/05_train_lstm.py
 python scripts/06_run_adaptive_lstm.py
 python scripts/07_compare_models.py
 python scripts/08_generate_experiment_report.py
+python scripts/09_upload_models_to_azure.py
+python scripts/09_upload_models_to_s3.py
 streamlit run dashboard/app.py
 uvicorn api.main:app --reload
 ```
@@ -199,6 +228,12 @@ Các kiểm tra bổ sung đã pass:
 - Report generator xử lý file thiếu mà không crash.
 - `outputs/experiment_report.md` đọc UTF-8 thành công và tất cả image links đều tồn tại.
 - README có đủ các section và command demo yêu cầu.
+- Mock S3 client đã pass upload, download, list và latest-model lookup.
+- Bulk upload mapping đã kiểm tra 34 artifact local với đúng prefix S3.
+- Script 09 thoát an toàn với warning khi thiếu AWS configuration.
+- Mock Azure Blob client đã pass upload, download, list và latest-model lookup.
+- Azure bulk upload mapping đã kiểm tra đúng prefix `models/`, `metrics/`, `figures/`.
+- Script Azure thoát an toàn với warning khi thiếu connection string hoặc container.
 
 ## Generated Outputs
 
@@ -266,7 +301,10 @@ Dataset synthetic CSV, model artifacts và nội dung trong `outputs/` nằm tro
 - Synthetic data hiện khá dễ đối với Random Forest, làm prediction error quá thấp để ADWIN trigger adaptive static retraining.
 - Adaptive LSTM ghi detection index theo error stream nhưng chỉ fine-tune sau khi xử lý xong window; effective update latency chưa được báo cáo riêng.
 - API với LSTM phải pad/lặp dữ liệu khi request không có đủ 10 timesteps; đây là mô phỏng, chưa phải stateful production inference.
-- AWS S3 upload/download chưa được triển khai; project hiện chỉ dùng local cloud model storage.
+- Chưa kiểm thử upload thật với AWS account/bucket; kiểm thử hiện tại dùng mock S3 client.
+- Python environment đang dùng để review chưa cài `boto3`; cần chạy `pip install -r requirements.txt` trước khi kết nối S3 thật.
+- Chưa kiểm thử upload thật với Azure Storage Account/container; kiểm thử hiện tại dùng mock Blob client.
+- Cần chạy `pip install -r requirements.txt` để cài `azure-storage-blob` trước khi kết nối Azure thật.
 - Chưa có automated unit/integration test suite.
 - Dependencies chưa pin version, nên khả năng tái lập môi trường giữa các máy chưa được đảm bảo hoàn toàn.
 - TensorFlow trên native Windows hiện chạy CPU; không sử dụng GPU với TensorFlow phiên bản mới.
@@ -283,7 +321,7 @@ Dataset synthetic CSV, model artifacts và nội dung trong `outputs/` nằm tro
 6. Thêm automated test suite cho data loader, preprocessing, ADWIN, model registry, API và dashboard.
 7. Pin dependency versions và thêm lock file để tăng khả năng tái lập.
 8. Đo inference latency, RAM, CPU/GPU usage và model update downtime.
-9. Mở rộng `aws_storage.py` để upload/download model qua S3 bằng environment variables hoặc IAM role.
+9. Kiểm thử Azure Blob với Storage Account/container thật và chuyển sang Managed Identity khi deploy.
 10. Tích hợp MQTT/Kafka để nhận IoT stream thời gian thực.
 11. Thử thêm DDM, EDDM, Page-Hinkley, KSWIN và Hoeffding Tree.
 12. Mở rộng sang multi-class attack classification.

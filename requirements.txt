@@ -11,4 +11,5 @@ streamlit
 plotly
 tqdm
 boto3
+azure-storage-blob
 python-dotenv

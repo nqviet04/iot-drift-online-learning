@@ -37,8 +37,14 @@ LSTM_TIMESTEPS = 10
 BINARY_LABEL_COLUMN = "label_binary"
 
 # AWS configuration is read from environment variables only.
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION")
 AWS_S3_BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME")
+
+# Azure Blob Storage configuration is read from environment variables only.
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+AZURE_BLOB_CONTAINER_NAME = os.getenv("AZURE_BLOB_CONTAINER_NAME")
 
 # Backward-compatible aliases for early skeleton modules.
 PROJECT_ROOT = ROOT_DIR
